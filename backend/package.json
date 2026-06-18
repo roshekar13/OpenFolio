@@ -10,8 +10,12 @@
     "seed": "tsx src/seed.ts",
     "import:history": "tsx src/importHistoricalTransactions.ts",
     "migrate:mongo": "tsx migration_backups/migrate.ts",
-    "backup:mongo": "tsx migration_backups/backupMongo.ts",
-    "sync:atlas": "tsx scripts/syncToAtlas.ts",
+    "migrate:to-atlas": "tsx scripts/syncToAtlas.ts --push",
+    "backup:mongo": "tsx scripts/backupFromAtlas.ts",
+    "backup:from-atlas": "tsx scripts/backupFromAtlas.ts",
+    "backup:mirror-local": "tsx scripts/syncToAtlas.ts --pull",
+    "sync:atlas": "tsx scripts/syncToAtlas.ts --push",
+    "sync:atlas:pull": "tsx scripts/syncToAtlas.ts --pull",
     "verify:atlas": "tsx scripts/verifyAtlasBackend.ts"
   },
   "dependencies": {

@@ -78,8 +78,30 @@ export function resolveMongoUri(): string | undefined {
   return sanitizeEnvValue(process.env.OPENFOLIO_MONGO_URI);
 }
 
+/** Local MongoDB used only as an offline mirror / failsafe (not the runtime primary). */
+export function resolveLocalBackupUri(): string {
+  loadServerEnv();
+  return sanitizeEnvValue(process.env.OPENFOLIO_LOCAL_MONGO_URI) ?? "mongodb://localhost:27017";
+}
+
+/**
+ * Primary database URI — Atlas in normal operation.
+ * Falls back to localhost only when OPENFOLIO_ALLOW_LOCAL_MONGO=true.
+ */
+export function resolvePrimaryMongoUri(): string {
+  const uri = resolveMongoUri();
+  if (uri) return uri;
+  if (sanitizeEnvValue(process.env.OPENFOLIO_ALLOW_LOCAL_MONGO) === "true") {
+    return "mongodb://localhost:27017";
+  }
+  throw new Error(
+    "No primary MongoDB URI configured. Set MONGO_URI in backend/.env to your Atlas connection string. " +
+      "For legacy local-only dev, set OPENFOLIO_ALLOW_LOCAL_MONGO=true."
+  );
+}
+
 export function resolveMongoUriOrDefault(): string {
-  return resolveMongoUri() ?? "mongodb://localhost:27017";
+  return resolvePrimaryMongoUri();
 }
 
 export function resolveMongoDbName(): string {

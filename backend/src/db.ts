@@ -1,33 +1,19 @@
 import bcrypt from "bcrypt";
-import { MongoClient, MongoNetworkError, type Db, type MongoClientOptions } from "mongodb";
+import { MongoClient, MongoNetworkError, type Db } from "mongodb";
 import {
   assertProductionMongoConfigured,
   loadServerEnv,
   redactMongoUri,
   resolveMongoDbName,
-  resolveMongoUri,
-  resolveMongoUriOrDefault,
+  resolvePrimaryMongoUri,
 } from "./loadEnv.js";
+import { isAtlasUri, mongoClientOptions } from "./mongoSync.js";
 import { SEED_OWNER_EMAIL, SEED_OWNER_ID } from "./migrate.js";
 
 const DEFAULT_WATCHLIST = ["CRWD", "MDB", "AMZN"] as const;
 
 let client: MongoClient | null = null;
 let db: Db | null = null;
-
-function isAtlasUri(uri: string): boolean {
-  return uri.startsWith("mongodb+srv://") || uri.includes("mongodb.net");
-}
-
-function clientOptions(uri: string): MongoClientOptions {
-  const isAtlas = isAtlasUri(uri);
-  return {
-    maxPoolSize: isAtlas ? 10 : 5,
-    minPoolSize: isAtlas ? 1 : 0,
-    serverSelectionTimeoutMS: isAtlas ? 15000 : 5000,
-    connectTimeoutMS: 15000,
-  };
-}
 
 function atlasConnectionHelp(): string {
   return [
@@ -43,10 +29,10 @@ export async function connectDb(): Promise<Db> {
   if (db) return db;
   loadServerEnv();
   assertProductionMongoConfigured();
-  const uri = resolveMongoUriOrDefault();
+  const uri = resolvePrimaryMongoUri();
   const dbName = resolveMongoDbName();
   console.log(`Connecting to MongoDB ${redactMongoUri(uri)} (db: ${dbName})`);
-  client = new MongoClient(uri, clientOptions(uri));
+  client = new MongoClient(uri, mongoClientOptions(uri));
   try {
     await client.connect();
   } catch (e) {

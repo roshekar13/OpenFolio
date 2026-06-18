@@ -1,20 +1,27 @@
-import { connectDb, getDb, closeDb } from "../src/db.js";
+import { connectDb, closeDb, getDb } from "../src/db.js";
+import { loadServerEnv, resolveMongoDbName, resolvePrimaryMongoUri, redactMongoUri } from "../src/loadEnv.js";
 import { listUserTransactions } from "../src/mongo/transactions.js";
 import { SEED_OWNER_ID } from "../src/migrate.js";
 
 async function main(): Promise<void> {
+  loadServerEnv();
+  console.log("Primary:", `${redactMongoUri(resolvePrimaryMongoUri())}/${resolveMongoDbName()}`);
   await connectDb();
-  const n = await getDb().collection("transactions").countDocuments();
-  const rows = await listUserTransactions(getDb(), SEED_OWNER_ID);
+  const db = getDb();
+  const counts = {
+    users: await db.collection("users").countDocuments(),
+    transactions: await db.collection("transactions").countDocuments(),
+    watchlist: await db.collection("watchlist").countDocuments(),
+    analytics_reports: await db.collection("analytics_reports").countDocuments(),
+  };
+  console.log("Collection counts:", counts);
+  const rows = await listUserTransactions(db, SEED_OWNER_ID);
   const sample = rows[0];
-  console.log("Atlas connected. transactions:", n);
   if (sample) {
-    console.log("API row keys:", Object.keys(sample).sort().join(", "));
-    console.log("quantity (number):", sample.quantity);
-    console.log("id (legacy string):", sample.id);
+    console.log("Sample transaction id:", sample.id, "ticker:", sample.ticker);
   }
   await closeDb();
-  console.log("Phase 3 backend validation: OK");
+  console.log("Atlas primary validation: OK");
 }
 
 void main().catch((e) => {

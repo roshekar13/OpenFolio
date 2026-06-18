@@ -21,6 +21,7 @@ backend/atlas-credentials.env
 
 # MongoDB backups
 backend/migration_backups/mongo-dump-*/
+backend/migration_backups/atlas-backup-*/
 
 # OS
 .DS_Store
