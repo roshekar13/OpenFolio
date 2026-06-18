@@ -392,3 +392,37 @@ export async function patchAuthMe(body: { displayName?: string; theme?: "dark" |
 export async function patchAuthDisplayName(displayName: string): Promise<AuthUser> {
   return patchAuthMe({ displayName });
 }
+
+export class ProfileError extends Error {
+  readonly code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "ProfileError";
+    this.code = code;
+  }
+}
+
+export type UpdateProfileInput = {
+  displayName?: string;
+  currentPassword?: string;
+  newPassword?: string;
+  confirmNewPassword?: string;
+};
+
+export async function patchAuthProfile(input: UpdateProfileInput): Promise<AuthUser> {
+  const r = await apiFetch("/api/auth/profile", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const j = (await r.json()) as { user?: AuthUser; error?: string; code?: string };
+  if (!r.ok) {
+    throw new ProfileError(
+      typeof j.error === "string" ? j.error : "Could not update profile.",
+      j.code
+    );
+  }
+  if (!j.user) throw new Error("Invalid profile response.");
+  return j.user;
+}

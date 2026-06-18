@@ -89,6 +89,19 @@ export async function updateUserProfile(
   return result;
 }
 
+export async function updateUserPasswordHash(
+  db: Db,
+  legacyId: string,
+  passwordHash: string
+): Promise<UserDoc | null> {
+  const result = await db.collection<UserDoc>("users").findOneAndUpdate(
+    { legacy_id: legacyId },
+    { $set: { password_hash: passwordHash } },
+    { returnDocument: "after" }
+  );
+  return result;
+}
+
 export function userCreatedAtIso(doc: UserDoc): string {
   return toIsoString(doc.created_at);
 }

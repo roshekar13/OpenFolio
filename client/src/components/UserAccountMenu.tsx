@@ -1,6 +1,37 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { AuthError } from "../api";
+import { AuthError, ProfileError } from "../api";
 import { useAuth } from "../AuthContext";
+
+const ALPHABET_NAME = /^[A-Za-z\s]*$/;
+
+function filterAlphabetName(raw: string): string {
+  return raw
+    .split("")
+    .filter((ch) => /[A-Za-z\s]/.test(ch))
+    .join("");
+}
+
+function HoverRevealPassword({
+  value,
+  onChange,
+  autoComplete,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  autoComplete?: string;
+}) {
+  const [revealed, setRevealed] = useState(false);
+  return (
+    <input
+      type={revealed ? "text" : "password"}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onMouseEnter={() => setRevealed(true)}
+      onMouseLeave={() => setRevealed(false)}
+      autoComplete={autoComplete}
+    />
+  );
+}
 
 function IconSun() {
   return (
@@ -88,11 +119,11 @@ function avatarLetter(user: { displayName: string; email: string } | null): stri
 }
 
 export function UserAccountMenu() {
-  const { user, authLoading, login, register, logout, updateDisplayName, updateTheme } = useAuth();
+  const { user, authLoading, login, register, logout, updateProfile, updateTheme } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const [registerOpen, setRegisterOpen] = useState(false);
-  const [editNameOpen, setEditNameOpen] = useState(false);
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [themeBusy, setThemeBusy] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -110,6 +141,9 @@ export function UserAccountMenu() {
   const [password2, setPassword2] = useState("");
   const [regName, setRegName] = useState("");
   const [editName, setEditName] = useState("");
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [formErr, setFormErr] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -120,11 +154,22 @@ export function UserAccountMenu() {
     setPassword2("");
     setRegName("");
     setEditName("");
+    setOldPassword("");
+    setNewPassword("");
+    setConfirmNewPassword("");
+  };
+
+  const resetProfileForm = () => {
+    setFormErr(null);
+    setEditName(user?.displayName ?? "");
+    setOldPassword("");
+    setNewPassword("");
+    setConfirmNewPassword("");
   };
 
   useEffect(() => {
-    if (user) setEditName(user.displayName || "");
-  }, [user, editNameOpen]);
+    if (user && editProfileOpen) setEditName(user.displayName || "");
+  }, [user, editProfileOpen]);
 
   const submitLogin = async (e?: FormEvent) => {
     e?.preventDefault();
@@ -171,20 +216,51 @@ export function UserAccountMenu() {
     }
   };
 
-  const submitEditName = async () => {
-    const n = editName.trim();
-    if (!n) {
-      setFormErr("Name is required.");
+  const submitEditProfile = async (e?: FormEvent) => {
+    e?.preventDefault();
+    setFormErr(null);
+
+    const name = editName.trim();
+    if (name && !ALPHABET_NAME.test(name)) {
+      setFormErr("Display name may only contain letters.");
       return;
     }
-    setFormErr(null);
+
+    const changingPassword =
+      oldPassword.length > 0 || newPassword.length > 0 || confirmNewPassword.length > 0;
+
+    if (changingPassword) {
+      if (newPassword !== confirmNewPassword) {
+        setFormErr("new passwords don't match");
+        return;
+      }
+      if (oldPassword && newPassword && oldPassword === newPassword) {
+        setFormErr("new password cannot be the same as the old one");
+        return;
+      }
+    }
+
     setPending(true);
     try {
-      await updateDisplayName(n);
-      setEditNameOpen(false);
+      await updateProfile({
+        displayName: name,
+        ...(changingPassword
+          ? {
+              currentPassword: oldPassword,
+              newPassword,
+              confirmNewPassword,
+            }
+          : {}),
+      });
+      setEditProfileOpen(false);
       setMenuOpen(false);
-    } catch (e) {
-      setFormErr(e instanceof Error ? e.message : "Update failed.");
+      resetProfileForm();
+    } catch (err) {
+      if (err instanceof ProfileError) {
+        setFormErr(err.message);
+      } else {
+        setFormErr(err instanceof Error ? err.message : "Update failed.");
+      }
     } finally {
       setPending(false);
     }
@@ -307,11 +383,11 @@ export function UserAccountMenu() {
             style={{ width: "100%", marginTop: 4, justifyContent: "flex-start" }}
             onClick={() => {
               setMenuOpen(false);
-              setEditNameOpen(true);
-              setFormErr(null);
+              setEditProfileOpen(true);
+              resetProfileForm();
             }}
           >
-            Edit name
+            Edit profile
           </button>
           <button
             type="button"
@@ -431,30 +507,62 @@ export function UserAccountMenu() {
         </Modal>
       )}
 
-      {editNameOpen && user && (
+      {editProfileOpen && user && (
         <Modal
-          title="Edit name"
+          title="Edit profile"
           onClose={() => {
-            setEditNameOpen(false);
-            resetForms();
+            setEditProfileOpen(false);
+            resetProfileForm();
           }}
         >
           {formErr && (
-            <div style={{ color: "#fecdd3", fontSize: 13, marginBottom: 10 }}>{formErr}</div>
+            <div role="alert" className="form-error" style={{ marginBottom: 10 }}>
+              {formErr}
+            </div>
           )}
-          <label style={{ display: "grid", gap: 6, fontSize: 13, color: "var(--muted)" }}>
-            Display name
-            <input value={editName} onChange={(e) => setEditName(e.target.value)} />
-          </label>
-          <button
-            type="button"
-            className="btn-primary"
-            style={{ marginTop: 14, width: "100%" }}
-            disabled={pending}
-            onClick={() => void submitEditName()}
+          <form
+            style={{ display: "grid", gap: 12 }}
+            onSubmit={(e) => {
+              void submitEditProfile(e);
+            }}
           >
-            {pending ? "Saving…" : "Save"}
-          </button>
+            <label style={{ display: "grid", gap: 6, fontSize: 13, color: "var(--muted)" }}>
+              Display name
+              <input
+                value={editName}
+                onChange={(e) => setEditName(filterAlphabetName(e.target.value))}
+                placeholder="Letters only — leave blank to use email initial"
+                autoComplete="name"
+              />
+            </label>
+            <label style={{ display: "grid", gap: 6, fontSize: 13, color: "var(--muted)" }}>
+              Old Password
+              <HoverRevealPassword
+                value={oldPassword}
+                onChange={setOldPassword}
+                autoComplete="current-password"
+              />
+            </label>
+            <label style={{ display: "grid", gap: 6, fontSize: 13, color: "var(--muted)" }}>
+              New Password
+              <HoverRevealPassword
+                value={newPassword}
+                onChange={setNewPassword}
+                autoComplete="new-password"
+              />
+            </label>
+            <label style={{ display: "grid", gap: 6, fontSize: 13, color: "var(--muted)" }}>
+              Confirm New Password
+              <HoverRevealPassword
+                value={confirmNewPassword}
+                onChange={setConfirmNewPassword}
+                autoComplete="new-password"
+              />
+            </label>
+            <button type="submit" className="btn-primary" style={{ marginTop: 2, width: "100%" }} disabled={pending}>
+              {pending ? "Saving…" : "Save"}
+            </button>
+          </form>
         </Modal>
       )}
     </div>
@@ -469,10 +577,15 @@ export function CompleteProfileModal() {
 
   if (!user?.needsDisplayName) return null;
 
-  const submit = async () => {
+  const submit = async (e?: FormEvent) => {
+    e?.preventDefault();
     const n = name.trim();
     if (!n) {
       setErr("Please enter your name.");
+      return;
+    }
+    if (!ALPHABET_NAME.test(n)) {
+      setErr("Display name may only contain letters.");
       return;
     }
     setErr(null);
@@ -491,20 +604,34 @@ export function CompleteProfileModal() {
       <p style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.5, marginTop: 0 }}>
         This is shown once so we can personalize your workspace.
       </p>
-      {err && <div style={{ color: "#fecdd3", fontSize: 13, marginBottom: 10 }}>{err}</div>}
-      <label style={{ display: "grid", gap: 6, fontSize: 13, color: "var(--muted)" }}>
-        Your name
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Jane Doe" autoFocus />
-      </label>
-      <button
-        type="button"
-        className="btn-primary"
-        style={{ marginTop: 16, width: "100%" }}
-        disabled={pending}
-        onClick={() => void submit()}
+      {err && (
+        <div role="alert" className="form-error" style={{ marginBottom: 10 }}>
+          {err}
+        </div>
+      )}
+      <form
+        onSubmit={(e) => {
+          void submit(e);
+        }}
       >
-        {pending ? "Saving…" : "Continue"}
-      </button>
+        <label style={{ display: "grid", gap: 6, fontSize: 13, color: "var(--muted)" }}>
+          Your name
+          <input
+            value={name}
+            onChange={(e) => setName(filterAlphabetName(e.target.value))}
+            placeholder="Jane Doe"
+            autoFocus
+          />
+        </label>
+        <button
+          type="submit"
+          className="btn-primary"
+          style={{ marginTop: 16, width: "100%" }}
+          disabled={pending}
+        >
+          {pending ? "Saving…" : "Continue"}
+        </button>
+      </form>
     </Modal>
   );
 }

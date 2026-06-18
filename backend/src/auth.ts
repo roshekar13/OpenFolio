@@ -14,8 +14,11 @@ import {
   issueApiToken,
   rowToPublic,
   updateUserProfile,
+  updateUserPasswordHash,
   userDocToPublicRow,
 } from "./mongo/users.js";
+
+const ALPHABET_NAME = /^[A-Za-z\s]+$/;
 
 const registerSchema = z.object({
   email: z.string().email().max(320),
@@ -36,6 +39,13 @@ const patchProfileSchema = z
   .refine((b) => b.displayName !== undefined || b.theme !== undefined, {
     message: "Provide displayName and/or theme.",
   });
+
+const updateProfileSchema = z.object({
+  displayName: z.string().max(120).optional(),
+  currentPassword: z.string().optional(),
+  newPassword: z.string().min(8).max(128).optional(),
+  confirmNewPassword: z.string().optional(),
+});
 
 export type PublicUser = {
   id: string;
@@ -193,5 +203,71 @@ export function registerAuthRoutes(app: Express, db: Db): void {
       return;
     }
     res.json({ user: rowToPublic(userDocToPublicRow(doc)) });
+  });
+
+  app.patch("/api/auth/profile", requireAuth, async (req, res) => {
+    const parsed = updateProfileSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.flatten() });
+      return;
+    }
+    const uid = req.session.userId!;
+    const doc = await findUserByLegacyId(db, uid);
+    if (!doc) {
+      res.status(404).json({ error: "User not found." });
+      return;
+    }
+
+    const { displayName, currentPassword, newPassword, confirmNewPassword } = parsed.data;
+
+    if (displayName !== undefined) {
+      const name = displayName.trim();
+      if (name && !ALPHABET_NAME.test(name)) {
+        res.status(400).json({
+          code: "INVALID_NAME",
+          error: "Display name may only contain letters.",
+        });
+        return;
+      }
+      await updateUserProfile(db, uid, { displayName: name });
+    }
+
+    const pwFields = [currentPassword, newPassword, confirmNewPassword];
+    const hasAnyPassword = pwFields.some((p) => (p ?? "").length > 0);
+    if (hasAnyPassword) {
+      if (!currentPassword || !newPassword || !confirmNewPassword) {
+        res.status(400).json({ error: "Fill in all password fields to change your password." });
+        return;
+      }
+      if (!bcrypt.compareSync(currentPassword, doc.password_hash)) {
+        res.status(401).json({
+          code: "OLD_PASSWORD_INCORRECT",
+          error: "old password incorrect",
+        });
+        return;
+      }
+      if (newPassword !== confirmNewPassword) {
+        res.status(400).json({
+          code: "NEW_PASSWORDS_MISMATCH",
+          error: "new passwords don't match",
+        });
+        return;
+      }
+      if (bcrypt.compareSync(newPassword, doc.password_hash)) {
+        res.status(400).json({
+          code: "NEW_PASSWORD_SAME",
+          error: "new password cannot be the same as the old one",
+        });
+        return;
+      }
+      await updateUserPasswordHash(db, uid, bcrypt.hashSync(newPassword, 10));
+    }
+
+    const updated = await findUserByLegacyId(db, uid);
+    if (!updated) {
+      res.status(404).json({ error: "User not found." });
+      return;
+    }
+    res.json({ user: rowToPublic(userDocToPublicRow(updated)) });
   });
 }

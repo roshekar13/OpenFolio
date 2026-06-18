@@ -12,9 +12,11 @@ import {
   fetchAuthMe,
   patchAuthDisplayName,
   patchAuthMe,
+  patchAuthProfile,
   postAuthLogin,
   postAuthLogout,
   postAuthRegister,
+  type UpdateProfileInput,
 } from "./api";
 import { setAuthToken } from "./http";
 
@@ -27,6 +29,7 @@ type AuthContextValue = {
   logout: () => Promise<void>;
   setUser: (u: AuthUser | null) => void;
   updateDisplayName: (name: string) => Promise<void>;
+  updateProfile: (input: UpdateProfileInput) => Promise<void>;
   updateTheme: (theme: "dark" | "light") => Promise<void>;
 };
 
@@ -94,6 +97,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(u);
   }, []);
 
+  const updateProfile = useCallback(async (input: UpdateProfileInput) => {
+    const u = await patchAuthProfile(input);
+    setUser(u);
+  }, []);
+
   const updateTheme = useCallback(async (theme: "dark" | "light") => {
     const u = await patchAuthMe({ theme });
     setUser(u);
@@ -109,9 +117,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       setUser,
       updateDisplayName,
+      updateProfile,
       updateTheme,
     }),
-    [user, authLoading, refresh, login, register, logout, updateDisplayName, updateTheme]
+    [user, authLoading, refresh, login, register, logout, updateDisplayName, updateProfile, updateTheme]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
