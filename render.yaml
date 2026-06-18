@@ -20,7 +20,9 @@ services:
         value: https://rorocantcode.github.io
       - key: SESSION_SECRET
         generateValue: true
-      - key: OPENFOLIO_MONGO_URI
+      - key: MONGO_URI
         sync: false
+      - key: OPENFOLIO_MONGO_DB
+        value: openfolio
       - key: GEMINI_API_KEY
         sync: false

@@ -11,6 +11,24 @@ const ENV_FILES = [
   path.join(backendRoot, "atlas-credentials.env"),
 ] as const;
 
+/** Trim Render/dashboard values; treat blank or quoted-empty as unset. */
+export function sanitizeEnvValue(raw: string | undefined): string | undefined {
+  if (raw == null) return undefined;
+  let value = raw.trim();
+  if (!value) return undefined;
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    value = value.slice(1, -1).trim();
+  }
+  return value || undefined;
+}
+
+export function redactMongoUri(uri: string): string {
+  return uri.replace(/\/\/([^:@/]+):([^@/]+)@/, "//$1:***@");
+}
+
 export function parseEnvFile(contents: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const line of contents.split("\n")) {
@@ -47,22 +65,41 @@ export function loadServerEnv(): void {
     applyEnvFile(file);
   }
   const mongoUri =
-    process.env.OPENFOLIO_MONGO_URI ??
-    process.env.MONGODB_URI ??
-    process.env.MONGO_URI;
-  if (mongoUri && !process.env.OPENFOLIO_MONGO_URI) {
+    sanitizeEnvValue(process.env.OPENFOLIO_MONGO_URI) ??
+    sanitizeEnvValue(process.env.MONGODB_URI) ??
+    sanitizeEnvValue(process.env.MONGO_URI);
+  if (mongoUri) {
     process.env.OPENFOLIO_MONGO_URI = mongoUri;
   }
 }
 
-export function resolveMongoUri(): string {
+export function resolveMongoUri(): string | undefined {
   loadServerEnv();
-  return process.env.OPENFOLIO_MONGO_URI ?? "mongodb://localhost:27017";
+  return sanitizeEnvValue(process.env.OPENFOLIO_MONGO_URI);
+}
+
+export function resolveMongoUriOrDefault(): string {
+  return resolveMongoUri() ?? "mongodb://localhost:27017";
 }
 
 export function resolveMongoDbName(): string {
   loadServerEnv();
-  return process.env.OPENFOLIO_MONGO_DB ?? "openfolio";
+  return sanitizeEnvValue(process.env.OPENFOLIO_MONGO_DB) ?? "openfolio";
+}
+
+export function assertProductionMongoConfigured(): void {
+  if (process.env.NODE_ENV !== "production") return;
+  const uri = resolveMongoUri();
+  if (!uri) {
+    throw new Error(
+      "Missing MongoDB URI in production. Set MONGO_URI (or OPENFOLIO_MONGO_URI) on Render to your Atlas connection string."
+    );
+  }
+  if (!uri.startsWith("mongodb://") && !uri.startsWith("mongodb+srv://")) {
+    throw new Error(
+      "MongoDB URI must start with mongodb:// or mongodb+srv://. Copy the full Atlas connection string (no surrounding quotes)."
+    );
+  }
 }
 
 export function resolveBackendRoot(): string {

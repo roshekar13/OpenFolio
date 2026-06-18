@@ -1,6 +1,13 @@
 import bcrypt from "bcrypt";
-import { MongoClient, type Db, type MongoClientOptions } from "mongodb";
-import { loadServerEnv, resolveMongoDbName, resolveMongoUri } from "./loadEnv.js";
+import { MongoClient, MongoNetworkError, type Db, type MongoClientOptions } from "mongodb";
+import {
+  assertProductionMongoConfigured,
+  loadServerEnv,
+  redactMongoUri,
+  resolveMongoDbName,
+  resolveMongoUri,
+  resolveMongoUriOrDefault,
+} from "./loadEnv.js";
 import { SEED_OWNER_EMAIL, SEED_OWNER_ID } from "./migrate.js";
 
 const DEFAULT_WATCHLIST = ["CRWD", "MDB", "AMZN"] as const;
@@ -8,9 +15,12 @@ const DEFAULT_WATCHLIST = ["CRWD", "MDB", "AMZN"] as const;
 let client: MongoClient | null = null;
 let db: Db | null = null;
 
-function clientOptions(): MongoClientOptions {
-  const uri = resolveMongoUri();
-  const isAtlas = uri.startsWith("mongodb+srv://") || uri.includes("mongodb.net");
+function isAtlasUri(uri: string): boolean {
+  return uri.startsWith("mongodb+srv://") || uri.includes("mongodb.net");
+}
+
+function clientOptions(uri: string): MongoClientOptions {
+  const isAtlas = isAtlasUri(uri);
   return {
     maxPoolSize: isAtlas ? 10 : 5,
     minPoolSize: isAtlas ? 1 : 0,
@@ -19,13 +29,32 @@ function clientOptions(): MongoClientOptions {
   };
 }
 
+function atlasConnectionHelp(): string {
+  return [
+    "MongoDB Atlas connection failed (TLS/network). Check:",
+    "  1. Atlas → Network Access → add 0.0.0.0/0 (allow from anywhere) for Render.",
+    "  2. Render env MONGO_URI is the full mongodb+srv://... string from Atlas (no quotes).",
+    "  3. Database user password matches Atlas; URL-encode special characters in the URI.",
+    "  4. Cluster is running (not paused) and the hostname in the URI is correct.",
+  ].join("\n");
+}
+
 export async function connectDb(): Promise<Db> {
   if (db) return db;
   loadServerEnv();
-  const uri = resolveMongoUri();
+  assertProductionMongoConfigured();
+  const uri = resolveMongoUriOrDefault();
   const dbName = resolveMongoDbName();
-  client = new MongoClient(uri, clientOptions());
-  await client.connect();
+  console.log(`Connecting to MongoDB ${redactMongoUri(uri)} (db: ${dbName})`);
+  client = new MongoClient(uri, clientOptions(uri));
+  try {
+    await client.connect();
+  } catch (e) {
+    if (e instanceof MongoNetworkError && isAtlasUri(uri)) {
+      throw new Error(`${e.message}\n\n${atlasConnectionHelp()}`);
+    }
+    throw e;
+  }
   db = client.db(dbName);
   await ensureIndexes(db);
   await ensureSeedOwner(db);
