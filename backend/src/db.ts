@@ -84,8 +84,8 @@ async function ensureIndexes(database: Db): Promise<void> {
 
 async function ensureSeedOwner(database: Db): Promise<void> {
   const users = database.collection("users");
-  const existing = await users.findOne({ email: SEED_OWNER_EMAIL.toLowerCase() });
-  if (existing) return;
+  const totalUsers = await users.countDocuments();
+  if (totalUsers > 0) return;
 
   const pwd = process.env.OPENFOLIO_OWNER_PASSWORD ?? "hello123";
   const hash = bcrypt.hashSync(pwd, 10);

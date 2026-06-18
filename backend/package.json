@@ -10,6 +10,7 @@
     "seed": "node --import tsx src/seed.ts",
     "import:history": "node --import tsx src/importHistoricalTransactions.ts",
     "migrate:mongo": "node --import tsx migration_backups/migrate.ts",
+    "publish:to-atlas": "node --import tsx migration_backups/migrate.ts --target atlas --drop",
     "migrate:to-atlas": "node --import tsx scripts/syncToAtlas.ts --push",
     "backup:mongo": "node --import tsx scripts/backupFromAtlas.ts",
     "backup:from-atlas": "node --import tsx scripts/backupFromAtlas.ts",

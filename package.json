@@ -10,6 +10,7 @@
     "start:backend": "npm run start -w backend",
     "import:history": "npm run import:history -w backend --",
     "migrate:mongo": "npm run migrate:mongo -w backend",
+    "publish:to-atlas": "npm run publish:to-atlas -w backend",
     "migrate:to-atlas": "npm run migrate:to-atlas -w backend",
     "backup:mongo": "npm run backup:from-atlas -w backend",
     "backup:from-atlas": "npm run backup:from-atlas -w backend",

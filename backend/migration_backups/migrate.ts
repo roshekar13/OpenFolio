@@ -12,6 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { MongoClient, ObjectId, type Db } from "mongodb";
+import { loadServerEnv, redactMongoUri, resolveMongoDbName, resolvePrimaryMongoUri } from "../src/loadEnv.js";
 import { toDate, toDecimal128 } from "../src/mongo/converters.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -19,7 +20,16 @@ const backendRoot = path.resolve(__dirname, "..");
 
 const SOURCE =
   process.env.OPENFOLIO_DB ?? path.join(backendRoot, "data", "openfolio.sqlite");
-const MONGO_URI = process.env.OPENFOLIO_MONGO_URI ?? "mongodb://localhost:27017";
+
+function resolveTargetMongoUri(): string {
+  if (process.argv.includes("--target") && process.argv.includes("atlas")) {
+    loadServerEnv();
+    return resolvePrimaryMongoUri();
+  }
+  loadServerEnv();
+  return process.env.OPENFOLIO_LOCAL_MONGO_URI ?? "mongodb://localhost:27017";
+}
+
 const MONGO_DB = process.env.OPENFOLIO_MONGO_DB ?? "openfolio";
 
 const COLLECTIONS = ["users", "transactions", "watchlist", "analytics_reports"] as const;
@@ -104,7 +114,8 @@ async function main(): Promise<void> {
   }
 
   console.log("SQLite source:", SOURCE);
-  console.log("MongoDB:", `${MONGO_URI}/${MONGO_DB}`);
+  const mongoUri = resolveTargetMongoUri();
+  console.log("MongoDB:", `${redactMongoUri(mongoUri)}/${MONGO_DB}`);
   console.log("Mode:", drop ? "drop collections then upsert" : "upsert on legacy_id");
 
   const sourceCounts = Object.fromEntries(
@@ -112,7 +123,9 @@ async function main(): Promise<void> {
   ) as Record<(typeof SQLITE_TABLES)[number], number>;
   console.log("\nSource row counts:", sourceCounts);
 
-  const client = new MongoClient(MONGO_URI);
+  const client = new MongoClient(mongoUri, {
+    serverSelectionTimeoutMS: mongoUri.includes("mongodb.net") ? 15000 : 5000,
+  });
   await client.connect();
   const db = client.db(MONGO_DB);
 
