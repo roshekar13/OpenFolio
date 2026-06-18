@@ -1,5 +1,5 @@
 import type { Db } from "mongodb";
-import { fetchUsdPrice } from "./prices.js";
+import { fetchPrices } from "./prices.js";
 import { fetchTwoWeekReturnPct } from "./momentum.js";
 import { listWatchlistTickers } from "./mongo/watchlist.js";
 
@@ -11,10 +11,16 @@ export async function loadWatchlistPayload(
   max: number;
 }> {
   const tickers = await listWatchlistTickers(db, userId);
+  const priceMap = await fetchPrices(tickers);
   const items = await Promise.all(
     tickers.map(async (ticker) => {
-      const [priceUsd, change2wPct] = await Promise.all([fetchUsdPrice(ticker), fetchTwoWeekReturnPct(ticker)]);
-      return { ticker, priceUsd, change2wPct };
+      const upper = ticker.trim().toUpperCase();
+      const change2wPct = await fetchTwoWeekReturnPct(ticker);
+      return {
+        ticker: upper,
+        priceUsd: priceMap[upper] ?? null,
+        change2wPct,
+      };
     })
   );
   return { items, max: 4 };

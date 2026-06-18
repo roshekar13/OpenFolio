@@ -1,17 +1,21 @@
 /**
- * Yahoo Finance chart/quote access for server-side use (Render, local API).
- * Datacenter IPs are blocked without a session cookie + crumb.
+ * Yahoo Finance access for server-side use (Render, local API).
+ * Datacenter IPs require a session cookie + crumb; batch quotes reduce rate limits.
  */
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
+const QUOTE_CHUNK = 20;
+const CHART_CONCURRENCY = 4;
 
 type YahooSession = { cookie: string; crumb: string; at: number };
 
 let sessionCache: YahooSession | null = null;
 let sessionPromise: Promise<YahooSession> | null = null;
+let chartActive = 0;
+const chartWaiters: Array<() => void> = [];
 
 function collectSetCookies(res: Response): string[] {
   if (typeof res.headers.getSetCookie === "function") {
@@ -69,6 +73,11 @@ async function fetchYahooSession(): Promise<YahooSession> {
 }
 
 async function getYahooSession(force = false): Promise<YahooSession> {
+  if (force) {
+    sessionCache = null;
+    sessionPromise = null;
+  }
+
   const now = Date.now();
   if (!force && sessionCache && now - sessionCache.at < SESSION_TTL_MS) {
     return sessionCache;
@@ -87,6 +96,17 @@ async function getYahooSession(force = false): Promise<YahooSession> {
   return sessionPromise;
 }
 
+/** Pre-warm Yahoo session before a batch of market requests. */
+export async function warmYahooSession(): Promise<boolean> {
+  try {
+    await getYahooSession(false);
+    return true;
+  } catch (e) {
+    console.error("Yahoo session warm-up failed:", e);
+    return false;
+  }
+}
+
 export function normalizeYahooSymbol(ticker: string): string {
   return ticker.trim().toUpperCase().replace(/\./g, "-");
 }
@@ -102,25 +122,101 @@ export type YahooChartJson = {
   };
 };
 
-/** Fetch Yahoo chart JSON with cookie + crumb (works from cloud hosts). */
+type YahooQuoteResponse = {
+  quoteResponse?: {
+    error?: { description?: string } | null;
+    result?: { symbol?: string; regularMarketPrice?: number }[] | null;
+  };
+};
+
+async function acquireChartSlot(): Promise<void> {
+  if (chartActive < CHART_CONCURRENCY) {
+    chartActive++;
+    return;
+  }
+  await new Promise<void>((resolve) => chartWaiters.push(resolve));
+  chartActive++;
+}
+
+function releaseChartSlot(): void {
+  chartActive--;
+  const next = chartWaiters.shift();
+  if (next) next();
+}
+
+async function yahooGet(url: string, session: YahooSession): Promise<Response> {
+  return fetch(url, {
+    headers: {
+      "User-Agent": BROWSER_UA,
+      Accept: "application/json",
+      Cookie: session.cookie,
+    },
+  });
+}
+
+/** Batch live quotes — one HTTP call for many symbols (preferred for portfolio/watchlist). */
+export async function fetchYahooQuotes(symbols: string[]): Promise<Record<string, number | null>> {
+  const unique = [...new Set(symbols.map(normalizeYahooSymbol).filter(Boolean))];
+  const out: Record<string, number | null> = {};
+  for (const sym of unique) out[sym] = null;
+  if (unique.length === 0) return out;
+
+  const fetchChunk = async (chunk: string[], forceSession: boolean): Promise<void> => {
+    const session = await getYahooSession(forceSession);
+    const symbolsParam = chunk.map(encodeURIComponent).join(",");
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbolsParam}&crumb=${encodeURIComponent(session.crumb)}`;
+    const res = await yahooGet(url, session);
+    if (res.status === 401 || res.status === 403 || !res.ok) {
+      throw new Error(`Yahoo quote request failed (${res.status}).`);
+    }
+    const json = (await res.json()) as YahooQuoteResponse;
+    if (json.quoteResponse?.error) {
+      throw new Error(String(json.quoteResponse.error.description ?? "Yahoo quote error."));
+    }
+    for (const row of json.quoteResponse?.result ?? []) {
+      const sym = normalizeYahooSymbol(row.symbol ?? "");
+      const px = row.regularMarketPrice;
+      if (sym && typeof px === "number" && Number.isFinite(px)) {
+        out[sym] = px;
+      }
+    }
+  };
+
+  try {
+    for (let i = 0; i < unique.length; i += QUOTE_CHUNK) {
+      await fetchChunk(unique.slice(i, i + QUOTE_CHUNK), false);
+    }
+  } catch (firstErr) {
+    console.warn("Yahoo quote batch failed, retrying with fresh session:", firstErr);
+    sessionCache = null;
+    try {
+      for (let i = 0; i < unique.length; i += QUOTE_CHUNK) {
+        await fetchChunk(unique.slice(i, i + QUOTE_CHUNK), true);
+      }
+    } catch (retryErr) {
+      console.error("Yahoo quote batch retry failed:", retryErr);
+    }
+  }
+
+  return out;
+}
+
+/** Fetch Yahoo chart JSON with cookie + crumb (historical / 2-week momentum). */
 export async function fetchYahooChart(symbolPath: string, query: string): Promise<YahooChartJson | null> {
   const sym = encodeURIComponent(normalizeYahooSymbol(symbolPath));
+
   const attempt = async (forceSession: boolean): Promise<YahooChartJson | null> => {
+    await acquireChartSlot();
     try {
-      const { cookie, crumb } = await getYahooSession(forceSession);
-      const url = `https://query2.finance.yahoo.com/v8/finance/chart/${sym}?${query}&crumb=${encodeURIComponent(crumb)}`;
-      const res = await fetch(url, {
-        headers: {
-          "User-Agent": BROWSER_UA,
-          Accept: "application/json",
-          Cookie: cookie,
-        },
-      });
-      if (res.status === 401 || res.status === 403) return null;
-      if (!res.ok) return null;
+      const session = await getYahooSession(forceSession);
+      const url = `https://query2.finance.yahoo.com/v8/finance/chart/${sym}?${query}&crumb=${encodeURIComponent(session.crumb)}`;
+      const res = await yahooGet(url, session);
+      if (res.status === 401 || res.status === 403 || !res.ok) return null;
       return (await res.json()) as YahooChartJson;
     } catch {
       return null;
+    } finally {
+      releaseChartSlot();
     }
   };
 
@@ -150,7 +246,6 @@ export function readDailyCloses(json: YahooChartJson): { t: number[]; c: (number
   return { t, c };
 }
 
-/** Clear cached Yahoo session (for tests or after repeated failures). */
 export function resetYahooSessionCache(): void {
   sessionCache = null;
   sessionPromise = null;
