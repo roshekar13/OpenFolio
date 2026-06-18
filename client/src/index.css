@@ -274,6 +274,12 @@ button {
   color: #fecdd3;
 }
 
+.form-error {
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .section-title {
   font-size: 13px;
   letter-spacing: 0.08em;

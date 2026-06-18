@@ -3,11 +3,15 @@ import type { Db } from "mongodb";
 import bcrypt from "bcrypt";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { getDb } from "./db.js";
 import { getClearCookieOptions, getSessionCookieName } from "./httpConfig.js";
 import {
+  clearApiToken,
+  findUserByApiToken,
   findUserByEmail,
   findUserByLegacyId,
   insertUser,
+  issueApiToken,
   rowToPublic,
   updateUserProfile,
   userDocToPublicRow,
@@ -41,18 +45,51 @@ export type PublicUser = {
   themePreference: "dark" | "light";
 };
 
+function readBearerToken(req: Request): string | null {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) return null;
+  const token = auth.slice("Bearer ".length).trim();
+  return token || null;
+}
+
+/** Resolve signed-in user from session cookie or Bearer token (GitHub Pages + Render). */
+export async function resolveLegacyUserId(req: Request, db: Db): Promise<string | null> {
+  if (req.session.userId) return req.session.userId;
+  const token = readBearerToken(req);
+  if (!token) return null;
+  const doc = await findUserByApiToken(db, token);
+  return doc?.legacy_id ?? null;
+}
+
+async function attachSessionAndToken(db: Db, req: Request, legacyId: string): Promise<string> {
+  const token = await issueApiToken(db, legacyId);
+  req.session.userId = legacyId;
+  await new Promise<void>((resolve, reject) => {
+    req.session.save((err) => (err ? reject(err) : resolve()));
+  });
+  return token;
+}
+
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  const uid = req.session.userId;
-  if (!uid) {
-    res.status(401).json({ error: "Sign in required." });
-    return;
-  }
-  next();
+  void (async () => {
+    try {
+      const db = getDb();
+      const uid = await resolveLegacyUserId(req, db);
+      if (!uid) {
+        res.status(401).json({ error: "Sign in required." });
+        return;
+      }
+      req.session.userId = uid;
+      next();
+    } catch (e) {
+      next(e);
+    }
+  })();
 }
 
 export function registerAuthRoutes(app: Express, db: Db): void {
   app.get("/api/auth/me", async (req, res) => {
-    const uid = req.session.userId;
+    const uid = await resolveLegacyUserId(req, db);
     if (!uid) {
       res.json({ user: null });
       return;
@@ -63,6 +100,7 @@ export function registerAuthRoutes(app: Express, db: Db): void {
       res.json({ user: null });
       return;
     }
+    req.session.userId = uid;
     res.json({ user: rowToPublic(userDocToPublicRow(doc)) });
   });
 
@@ -87,8 +125,12 @@ export function registerAuthRoutes(app: Express, db: Db): void {
       passwordHash: hash,
       displayName: name,
     });
-    req.session.userId = id;
-    res.status(201).json({ user: rowToPublic(userDocToPublicRow(doc)) });
+    try {
+      const token = await attachSessionAndToken(db, req, id);
+      res.status(201).json({ user: rowToPublic(userDocToPublicRow(doc)), token });
+    } catch {
+      res.status(500).json({ error: "Could not create session." });
+    }
   });
 
   app.post("/api/auth/login", async (req, res) => {
@@ -99,15 +141,31 @@ export function registerAuthRoutes(app: Express, db: Db): void {
     }
     const email = parsed.data.email.trim().toLowerCase();
     const doc = await findUserByEmail(db, email);
-    if (!doc || !bcrypt.compareSync(parsed.data.password, doc.password_hash)) {
-      res.status(401).json({ error: "Invalid email or password." });
+    if (!doc) {
+      res.status(404).json({
+        code: "EMAIL_NOT_FOUND",
+        error: "Email not recognized. Please register as a new user.",
+      });
       return;
     }
-    req.session.userId = doc.legacy_id;
-    res.json({ user: rowToPublic(userDocToPublicRow(doc)) });
+    if (!bcrypt.compareSync(parsed.data.password, doc.password_hash)) {
+      res.status(401).json({
+        code: "WRONG_PASSWORD",
+        error: "Incorrect password. Please try again.",
+      });
+      return;
+    }
+    try {
+      const token = await attachSessionAndToken(db, req, doc.legacy_id);
+      res.json({ user: rowToPublic(userDocToPublicRow(doc)), token });
+    } catch {
+      res.status(500).json({ error: "Could not create session." });
+    }
   });
 
-  app.post("/api/auth/logout", (req, res) => {
+  app.post("/api/auth/logout", async (req, res) => {
+    const uid = await resolveLegacyUserId(req, db);
+    if (uid) await clearApiToken(db, uid);
     req.session.destroy((err) => {
       if (err) {
         res.status(500).json({ error: "Could not sign out." });

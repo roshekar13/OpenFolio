@@ -16,6 +16,7 @@ import {
   postAuthLogout,
   postAuthRegister,
 } from "./api";
+import { setAuthToken } from "./http";
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -37,6 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     const { user: u } = await fetchAuthMe();
+    if (!u) setAuthToken(null);
     setUser(u);
   }, []);
 
@@ -53,18 +55,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const login = useCallback(async (email: string, password: string) => {
-    const u = await postAuthLogin(email, password);
-    setUser(u);
+    const { user: signedIn, token } = await postAuthLogin(email, password);
+    setAuthToken(token);
+    setUser(signedIn);
+    const { user: verified } = await fetchAuthMe();
+    if (!verified) {
+      setAuthToken(null);
+      setUser(null);
+      throw new Error("Sign-in succeeded but the session could not be verified. Please try again.");
+    }
+    setUser(verified);
   }, []);
 
   const register = useCallback(async (email: string, password: string, displayName?: string) => {
-    const u = await postAuthRegister(email, password, displayName);
-    setUser(u);
+    const { user: created, token } = await postAuthRegister(email, password, displayName);
+    setAuthToken(token);
+    setUser(created);
+    const { user: verified } = await fetchAuthMe();
+    if (!verified) {
+      setAuthToken(null);
+      setUser(null);
+      throw new Error("Account created but the session could not be verified. Please sign in.");
+    }
+    setUser(verified);
   }, []);
 
   const logout = useCallback(async () => {
-    await postAuthLogout();
-    setUser(null);
+    try {
+      await postAuthLogout();
+    } finally {
+      setAuthToken(null);
+      setUser(null);
+    }
   }, []);
 
   const updateDisplayName = useCallback(async (name: string) => {

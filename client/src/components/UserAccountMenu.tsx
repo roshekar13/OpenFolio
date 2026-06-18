@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { AuthError } from "../api";
 import { useAuth } from "../AuthContext";
 
 function IconSun() {
@@ -125,15 +126,24 @@ export function UserAccountMenu() {
     if (user) setEditName(user.displayName || "");
   }, [user, editNameOpen]);
 
-  const submitLogin = async () => {
+  const submitLogin = async (e?: FormEvent) => {
+    e?.preventDefault();
     setFormErr(null);
+    if (!email.trim() || !password) {
+      setFormErr("Enter your email and password.");
+      return;
+    }
     setPending(true);
     try {
       await login(email.trim(), password);
       setLoginOpen(false);
       resetForms();
-    } catch (e) {
-      setFormErr(e instanceof Error ? e.message : "Sign in failed.");
+    } catch (err) {
+      if (err instanceof AuthError) {
+        setFormErr(err.message);
+      } else {
+        setFormErr(err instanceof Error ? err.message : "Sign in failed.");
+      }
     } finally {
       setPending(false);
     }
@@ -324,9 +334,16 @@ export function UserAccountMenu() {
           }}
         >
           {formErr && (
-            <div style={{ color: "#fecdd3", fontSize: 13, marginBottom: 10 }}>{formErr}</div>
+            <div role="alert" className="form-error" style={{ marginBottom: 10 }}>
+              {formErr}
+            </div>
           )}
-          <div style={{ display: "grid", gap: 12 }}>
+          <form
+            style={{ display: "grid", gap: 12 }}
+            onSubmit={(e) => {
+              void submitLogin(e);
+            }}
+          >
             <label style={{ display: "grid", gap: 6, fontSize: 13, color: "var(--muted)" }}>
               Email
               <input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
@@ -340,7 +357,7 @@ export function UserAccountMenu() {
                 autoComplete="current-password"
               />
             </label>
-            <button type="button" className="btn-primary" disabled={pending} onClick={() => void submitLogin()}>
+            <button type="submit" className="btn-primary" disabled={pending}>
               {pending ? "Signing in…" : "Sign in"}
             </button>
             <button
@@ -354,7 +371,7 @@ export function UserAccountMenu() {
             >
               Create account
             </button>
-          </div>
+          </form>
         </Modal>
       )}
 

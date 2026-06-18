@@ -1,4 +1,5 @@
 import type { Db } from "mongodb";
+import { nanoid } from "nanoid";
 import type { PublicUser } from "../auth.js";
 import type { UserDoc } from "./types.js";
 import { toIsoString } from "./converters.js";
@@ -37,6 +38,22 @@ export async function findUserByLegacyId(db: Db, legacyId: string): Promise<User
 
 export async function findUserByEmail(db: Db, email: string): Promise<UserDoc | null> {
   return db.collection<UserDoc>("users").findOne({ email: email.trim().toLowerCase() });
+}
+
+export async function findUserByApiToken(db: Db, token: string): Promise<UserDoc | null> {
+  const trimmed = token.trim();
+  if (!trimmed) return null;
+  return db.collection<UserDoc>("users").findOne({ api_token: trimmed });
+}
+
+export async function issueApiToken(db: Db, legacyId: string): Promise<string> {
+  const token = nanoid(48);
+  await db.collection<UserDoc>("users").updateOne({ legacy_id: legacyId }, { $set: { api_token: token } });
+  return token;
+}
+
+export async function clearApiToken(db: Db, legacyId: string): Promise<void> {
+  await db.collection<UserDoc>("users").updateOne({ legacy_id: legacyId }, { $unset: { api_token: "" } });
 }
 
 export async function insertUser(

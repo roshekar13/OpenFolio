@@ -8,6 +8,7 @@ import {
 } from "recharts";
 import type { CapitalOverview, PortfolioResponse, Position, TransactionRow, WatchlistResponse } from "./api";
 import { fetchPortfolio, fetchTransactions, fetchWatchlist, postBulkDeleteTransactions } from "./api";
+import { setAuthToken } from "./http";
 import { AdvancedAnalyticsPage } from "./components/AdvancedAnalyticsPage";
 import { BuyVsCurrentChart } from "./components/BuyVsCurrentChart";
 import { BrandMark } from "./components/BrandMark";
@@ -522,7 +523,7 @@ export default function App() {
 }
 
 function AppShell() {
-  const { user, authLoading, refresh } = useAuth();
+  const { user, authLoading, refresh, logout } = useAuth();
   const [page, setPage] = useState<PageId>("home");
   const [data, setData] = useState<PortfolioResponse | null>(null);
   const [tx, setTx] = useState<TransactionRow[] | null>(null);
@@ -543,16 +544,17 @@ function AppShell() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Load failed";
       if (msg === "UNAUTHORIZED") {
-        await refresh();
+        setAuthToken(null);
+        await logout();
         setData(null);
         setTx(null);
         setWatchlistData(null);
-        setError("Please sign in again.");
+        setError("Your session expired. Please sign in again.");
         return;
       }
       setError(msg);
     }
-  }, [refresh]);
+  }, [logout]);
 
   const loadWatchlistOnly = useCallback(async () => {
     if (!user || user.needsDisplayName) return;

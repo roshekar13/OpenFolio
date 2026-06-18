@@ -9,6 +9,8 @@ export type UserDoc = {
   display_name: string;
   theme: "dark" | "light";
   created_at: Date;
+  /** Bearer token for cross-origin clients (GitHub Pages + Render). */
+  api_token?: string;
 };
 
 export type TransactionDoc = {

@@ -1,5 +1,27 @@
 import { apiFetch } from "./http";
 
+export class AuthError extends Error {
+  readonly code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "AuthError";
+    this.code = code;
+  }
+}
+
+type AuthPayload = { user?: AuthUser; token?: string; error?: string; code?: string };
+
+function parseAuthError(status: number, payload: AuthPayload, fallback: string): AuthError {
+  if (payload.code === "EMAIL_NOT_FOUND" || status === 404) {
+    return new AuthError("Email not recognized. Please register as a new user.", "EMAIL_NOT_FOUND");
+  }
+  if (payload.code === "WRONG_PASSWORD" || status === 401) {
+    return new AuthError("Incorrect password. Please try again.", "WRONG_PASSWORD");
+  }
+  return new AuthError(typeof payload.error === "string" ? payload.error : fallback);
+}
+
 export type FundingSource = "dbs" | "bonus" | "proceeds" | "unspecified";
 
 export type TransactionRow = {
@@ -319,32 +341,35 @@ export async function fetchAuthMe(): Promise<{ user: AuthUser | null }> {
   };
 }
 
-export async function postAuthLogin(email: string, password: string): Promise<AuthUser> {
+export async function postAuthLogin(
+  email: string,
+  password: string
+): Promise<{ user: AuthUser; token: string }> {
   const r = await apiFetch("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
-  const j = (await r.json()) as { user?: AuthUser; error?: string };
-  if (!r.ok) throw new Error(typeof j.error === "string" ? j.error : "Sign in failed.");
-  if (!j.user) throw new Error("Invalid sign-in response.");
-  return j.user;
+  const j = (await r.json()) as AuthPayload;
+  if (!r.ok) throw parseAuthError(r.status, j, "Sign in failed.");
+  if (!j.user || !j.token) throw new Error("Invalid sign-in response.");
+  return { user: j.user, token: j.token };
 }
 
 export async function postAuthRegister(
   email: string,
   password: string,
   displayName?: string
-): Promise<AuthUser> {
+): Promise<{ user: AuthUser; token: string }> {
   const r = await apiFetch("/api/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password, displayName: displayName || undefined }),
   });
-  const j = (await r.json()) as { user?: AuthUser; error?: string };
-  if (!r.ok) throw new Error(typeof j.error === "string" ? j.error : "Could not create account.");
-  if (!j.user) throw new Error("Invalid registration response.");
-  return j.user;
+  const j = (await r.json()) as AuthPayload;
+  if (!r.ok) throw new AuthError(typeof j.error === "string" ? j.error : "Could not create account.");
+  if (!j.user || !j.token) throw new Error("Invalid registration response.");
+  return { user: j.user, token: j.token };
 }
 
 export async function postAuthLogout(): Promise<void> {
