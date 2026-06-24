@@ -15,6 +15,9 @@ import { BrandMark } from "./components/BrandMark";
 import { ImportCsvModal } from "./components/ImportCsvModal";
 import { TransactionModal } from "./components/TransactionModal";
 import { WatchlistPanel } from "./components/WatchlistPanel";
+import { DemoBanner } from "./components/DemoBanner";
+import { WhyOpenFolioModal } from "./components/WhyOpenFolioModal";
+import { DEMO_PORTFOLIO, DEMO_TRANSACTIONS, DEMO_WATCHLIST } from "./demoPortfolio";
 import { CurrencyProvider, useCurrency } from "./CurrencyContext";
 import { AuthProvider, useAuth } from "./AuthContext";
 import { CompleteProfileModal, UserAccountMenu } from "./components/UserAccountMenu";
@@ -170,6 +173,7 @@ function HomeView({
   chartOn,
   setChartOn,
   onWatchlistChanged,
+  readOnly = false,
 }: {
   c: CapitalOverview;
   weightedXirr: number;
@@ -178,6 +182,7 @@ function HomeView({
   chartOn: Record<string, boolean>;
   setChartOn: Dispatch<SetStateAction<Record<string, boolean>>>;
   onWatchlistChanged: () => void;
+  readOnly?: boolean;
 }) {
   const { currency, liveFx, toDisplayFromUsd } = useCurrency();
 
@@ -260,7 +265,7 @@ function HomeView({
           <h2 className="section-title" style={{ margin: "0 0 12px" }}>
             Watchlist
           </h2>
-          <WatchlistPanel data={watchlistData} onChanged={onWatchlistChanged} />
+          <WatchlistPanel data={watchlistData} onChanged={onWatchlistChanged} readOnly={readOnly} />
         </div>
       </section>
 
@@ -352,11 +357,13 @@ function LedgerView({
   onDeleted,
   onEdit,
   onImportCsv,
+  readOnly = false,
 }: {
   transactions: TransactionRow[];
   onDeleted: () => void;
   onEdit: (row: TransactionRow) => void;
   onImportCsv: () => void;
+  readOnly?: boolean;
 }) {
   const { currency, fmtLedgerPrice, fmtLedgerFees } = useCurrency();
   const [selectMode, setSelectMode] = useState(false);
@@ -418,13 +425,17 @@ function LedgerView({
           gap: 10,
         }}
       >
-        <button type="button" className="btn-ghost" style={{ padding: "8px 12px", fontSize: 13 }} onClick={onImportCsv}>
-          Import CSV
-        </button>
-        <button type="button" className="btn-ghost" style={{ padding: "8px 12px", fontSize: 13 }} onClick={toggleSelectMode}>
-          {selectMode ? "Cancel" : "Select rows"}
-        </button>
-        {selectMode && (
+        {!readOnly && (
+          <>
+            <button type="button" className="btn-ghost" style={{ padding: "8px 12px", fontSize: 13 }} onClick={onImportCsv}>
+              Import CSV
+            </button>
+            <button type="button" className="btn-ghost" style={{ padding: "8px 12px", fontSize: 13 }} onClick={toggleSelectMode}>
+              {selectMode ? "Cancel" : "Select rows"}
+            </button>
+          </>
+        )}
+        {selectMode && !readOnly && (
           <button
             type="button"
             className="btn-ghost"
@@ -459,7 +470,7 @@ function LedgerView({
               <th>FX @ trade</th>
               <th>Fees ({currency})</th>
               <th>Notes</th>
-              {!selectMode && <th style={{ width: 72 }} />}
+              {!selectMode && !readOnly && <th style={{ width: 72 }} />}
             </tr>
           </thead>
           <tbody>
@@ -493,7 +504,7 @@ function LedgerView({
                 <td className="mono">{Number(t.fx_sgd_per_usd).toFixed(4)}</td>
                 <td className="mono">{fmtLedgerFees(t, 2)}</td>
                 <td style={{ color: "var(--muted)", maxWidth: 320 }}>{t.notes ?? ""}</td>
-                {!selectMode && (
+                {!selectMode && !readOnly && (
                   <td>
                     <button
                       type="button"
@@ -510,6 +521,21 @@ function LedgerView({
           </tbody>
         </table>
       </div>
+    </section>
+  );
+}
+
+function DemoAnalyticsView() {
+  return (
+    <section className="panel" style={{ maxWidth: 640 }}>
+      <h2 className="section-title">Advanced Analytics</h2>
+      <p style={{ color: "var(--muted)", lineHeight: 1.65, marginTop: 0 }}>
+        AI-powered portfolio reviews and investment idea reports are available after you create an account. Your
+        private ledger powers personalized analysis — the sample portfolio cannot run live analytics.
+      </p>
+      <p style={{ color: "var(--muted)", lineHeight: 1.65, marginBottom: 0 }}>
+        Sign in from the account button in the top-right corner to unlock Advanced Analytics on your own data.
+      </p>
     </section>
   );
 }
@@ -533,6 +559,7 @@ function AppShell() {
   const [editTx, setEditTx] = useState<TransactionRow | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [chartOn, setChartOn] = useState<Record<string, boolean>>({});
+  const [whyOpenFolioOpen, setWhyOpenFolioOpen] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -581,7 +608,14 @@ function AppShell() {
 
   useEffect(() => {
     if (authLoading || !authReady) return;
-    if (!user || user.needsDisplayName) {
+    if (!user) {
+      setData(DEMO_PORTFOLIO);
+      setTx(DEMO_TRANSACTIONS);
+      setWatchlistData(DEMO_WATCHLIST);
+      setError(null);
+      return;
+    }
+    if (user.needsDisplayName) {
       setData(null);
       setTx(null);
       setWatchlistData(null);
@@ -613,10 +647,14 @@ function AppShell() {
 
   const c = data?.capital;
   const positions = data?.positions ?? [];
-  const portfolioReady = Boolean(user && !user.needsDisplayName && data && tx !== null);
+  const isDemo = !user && authReady && !authLoading;
+  const portfolioReady = Boolean(
+    (isDemo && data && tx !== null) || (user && !user.needsDisplayName && data && tx !== null)
+  );
   const headerActionsDisabled = !user || Boolean(user.needsDisplayName);
 
   const homePageTitle = useMemo(() => {
+    if (isDemo) return "Sample Investment Portfolio";
     if (!user) return "Your Investment Portfolio";
     const name = user.displayName.trim();
     const raw = name || (user.email.includes("@") ? user.email.split("@")[0]! : user.email);
@@ -627,7 +665,7 @@ function AppShell() {
       .join(" ");
     if (!display) return "Your Investment Portfolio";
     return `${display}'s Investment Portfolio`;
-  }, [user]);
+  }, [user, isDemo]);
 
   const pageTitle =
     page === "home"
@@ -674,6 +712,15 @@ function AppShell() {
               );
             })}
           </nav>
+          <div className="sidebar-footer">
+            <button
+              type="button"
+              className="sidebar-trust-btn"
+              onClick={() => setWhyOpenFolioOpen(true)}
+            >
+              why OpenFolio?
+            </button>
+          </div>
         </aside>
 
         <div className="main-area">
@@ -691,15 +738,7 @@ function AppShell() {
           <main className="main-content">
             {authLoading && <p style={{ color: "var(--muted)" }}>Checking session…</p>}
 
-            {!authLoading && !user && (
-              <section style={{ maxWidth: 520 }}>
-                <h2 className="section-title">Welcome</h2>
-                <p style={{ color: "var(--muted)", lineHeight: 1.65 }}>
-                  Use the account button in the top-right corner to sign in or create an account. Each user has a
-                  private transaction ledger and watchlist.
-                </p>
-              </section>
-            )}
+            {isDemo && <DemoBanner />}
 
             {!authLoading && user && user.needsDisplayName && (
               <p style={{ color: "var(--muted)" }}>Add your name in the dialog above to continue.</p>
@@ -718,6 +757,7 @@ function AppShell() {
                 chartOn={chartOn}
                 setChartOn={setChartOn}
                 onWatchlistChanged={() => void loadWatchlistOnly()}
+                readOnly={isDemo}
               />
             )}
 
@@ -729,30 +769,32 @@ function AppShell() {
                 onDeleted={() => void load()}
                 onEdit={(row) => setEditTx(row)}
                 onImportCsv={() => setImportOpen(true)}
+                readOnly={isDemo}
               />
             )}
 
-            {portfolioReady && page === "analytics" && <AdvancedAnalyticsPage />}
+            {portfolioReady && page === "analytics" && (isDemo ? <DemoAnalyticsView /> : <AdvancedAnalyticsPage />)}
           </main>
         </div>
       </div>
 
       <TransactionModal
-        open={modal && portfolioReady}
+        open={modal && portfolioReady && !isDemo}
         onClose={() => setModal(false)}
         onSaved={() => void load()}
       />
       <TransactionModal
-        open={Boolean(editTx) && portfolioReady}
+        open={Boolean(editTx) && portfolioReady && !isDemo}
         editRow={editTx}
         onClose={() => setEditTx(null)}
         onSaved={() => void load()}
       />
       <ImportCsvModal
-        open={importOpen && portfolioReady}
+        open={importOpen && portfolioReady && !isDemo}
         onClose={() => setImportOpen(false)}
         onImported={() => void load()}
       />
+      <WhyOpenFolioModal open={whyOpenFolioOpen} onClose={() => setWhyOpenFolioOpen(false)} />
 
       <style>{`
         input, select, textarea {

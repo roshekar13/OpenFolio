@@ -7,9 +7,11 @@ import { fmtPct, fmtUsd } from "../format";
 export function WatchlistPanel({
   data,
   onChanged,
+  readOnly = false,
 }: {
   data: WatchlistResponse | null;
   onChanged: () => void;
+  readOnly?: boolean;
 }) {
   const { currency, fmtPortfolioMoney, liveFx } = useCurrency();
   const [tickerInput, setTickerInput] = useState("");
@@ -63,36 +65,38 @@ export function WatchlistPanel({
 
   return (
     <div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 12 }}>
-        <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 200 }}>
-          <input
-            value={tickerInput}
-            onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
-            placeholder="Add ticker"
-            disabled={busy || items.length >= max}
-            style={{ flex: 1, minWidth: 0 }}
-          />
-          <button
-            type="button"
-            disabled={busy || items.length >= max}
-            onClick={() => void add()}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 10,
-              border: "1px solid var(--stroke)",
-              background: "rgba(255,255,255,0.06)",
-              color: "var(--text)",
-              fontWeight: 600,
-              whiteSpace: "nowrap",
-            }}
-          >
-            Add
-          </button>
+      {!readOnly && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 200 }}>
+            <input
+              value={tickerInput}
+              onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
+              placeholder="Add ticker"
+              disabled={busy || items.length >= max}
+              style={{ flex: 1, minWidth: 0 }}
+            />
+            <button
+              type="button"
+              disabled={busy || items.length >= max}
+              onClick={() => void add()}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: "1px solid var(--stroke)",
+                background: "rgba(255,255,255,0.06)",
+                color: "var(--text)",
+                fontWeight: 600,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Add
+            </button>
+          </div>
+          <span className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>
+            {items.length}/{max}
+          </span>
         </div>
-        <span className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>
-          {items.length}/{max}
-        </span>
-      </div>
+      )}
       {err && (
         <div
           style={{
@@ -121,9 +125,10 @@ export function WatchlistPanel({
           return (
             <div
               key={w.ticker}
+              className="watch-row"
               style={{
                 display: "grid",
-                gridTemplateColumns: "1fr auto auto",
+                gridTemplateColumns: readOnly ? "1fr auto" : "1fr auto auto",
                 alignItems: "center",
                 gap: 12,
                 padding: "12px 14px",
@@ -149,22 +154,24 @@ export function WatchlistPanel({
                   {fmtPrice(w.priceUsd)}
                 </div>
               </div>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void remove(w.ticker)}
-                style={{
-                  border: "1px solid var(--stroke)",
-                  background: "rgba(255,255,255,0.04)",
-                  color: "var(--muted)",
-                  borderRadius: 10,
-                  padding: "6px 10px",
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}
-              >
-                Remove
-              </button>
+              {!readOnly && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void remove(w.ticker)}
+                  style={{
+                    border: "1px solid var(--stroke)",
+                    background: "rgba(255,255,255,0.04)",
+                    color: "var(--muted)",
+                    borderRadius: 10,
+                    padding: "6px 10px",
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}
+                >
+                  Remove
+                </button>
+              )}
             </div>
           );
         })}

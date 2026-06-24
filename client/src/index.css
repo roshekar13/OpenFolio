@@ -171,6 +171,88 @@ button {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  flex: 1;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.sidebar-trust-btn {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-trust-btn:hover {
+  background: rgba(94, 234, 212, 0.08);
+  border-color: rgba(94, 234, 212, 0.22);
+  color: var(--text);
+}
+
+.demo-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 14px;
+  margin-bottom: 22px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(94, 234, 212, 0.28);
+  background: linear-gradient(135deg, rgba(94, 234, 212, 0.1), rgba(124, 156, 255, 0.08));
+}
+
+.demo-banner-badge {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(94, 234, 212, 0.16);
+  border: 1px solid rgba(94, 234, 212, 0.35);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.demo-banner-text {
+  margin: 0;
+  flex: 1;
+  min-width: 220px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.demo-banner-text strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+:root[data-theme="light"] .sidebar-trust-btn {
+  background: rgba(15, 23, 42, 0.03);
+}
+
+:root[data-theme="light"] .sidebar-trust-btn:hover {
+  background: rgba(13, 148, 136, 0.1);
+}
+
+:root[data-theme="light"] .demo-banner {
+  border-color: rgba(13, 148, 136, 0.28);
+  background: linear-gradient(135deg, rgba(13, 148, 136, 0.08), rgba(67, 56, 202, 0.06));
+}
+
+:root[data-theme="light"] .demo-banner-badge {
+  background: rgba(13, 148, 136, 0.12);
+  border-color: rgba(13, 148, 136, 0.3);
 }
 
 .sidebar-link {
@@ -498,6 +580,10 @@ button {
     flex-wrap: wrap;
     flex: 1;
     justify-content: flex-end;
+  }
+  .sidebar-footer {
+    width: 100%;
+    margin-top: 4px;
   }
   .sidebar-link {
     min-width: 140px;
