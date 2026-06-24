@@ -9,7 +9,9 @@ const BROWSER_UA =
 
 const SESSION_TTL_MS = 25 * 60 * 1000;
 const QUOTE_CHUNK = 20;
-const MAX_ATTEMPTS = 3;
+const MAX_ATTEMPTS = 5;
+const QUOTE_HOSTS = ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"] as const;
+const CRUMB_HOSTS = ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"] as const;
 
 type YahooSession = { cookie: string; crumb: string; at: number };
 
@@ -44,39 +46,74 @@ function cookieHeaderFromSetCookies(setCookies: string[]): string {
   return setCookies.map((c) => c.split(";")[0]?.trim()).filter(Boolean).join("; ");
 }
 
+function mergeCookieHeaders(existing: string, setCookies: string[]): string {
+  const jar = new Map<string, string>();
+  for (const part of existing.split(";")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    jar.set(trimmed.slice(0, eq), trimmed.slice(eq + 1));
+  }
+  for (const raw of setCookies) {
+    const pair = raw.split(";")[0]?.trim();
+    if (!pair) continue;
+    const eq = pair.indexOf("=");
+    if (eq <= 0) continue;
+    jar.set(pair.slice(0, eq), pair.slice(eq + 1));
+  }
+  return [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+}
+
+function yahooHeaders(cookie: string, accept = "application/json"): Record<string, string> {
+  return {
+    "User-Agent": BROWSER_UA,
+    Accept: accept,
+    Cookie: cookie,
+    Referer: "https://finance.yahoo.com/",
+    Origin: "https://finance.yahoo.com",
+  };
+}
+
 async function fetchYahooSession(): Promise<YahooSession> {
+  let cookies = "";
   const attempts: Array<() => Promise<string>> = [
     async () => {
       const res = await fetch("https://fc.yahoo.com", {
         redirect: "manual",
         headers: { "User-Agent": BROWSER_UA, Accept: "text/html" },
       });
-      let cookies = cookieHeaderFromSetCookies(collectSetCookies(res));
-      if ((res.status === 301 || res.status === 302) && !cookies) {
-        const location = res.headers.get("location");
-        if (location) {
-          const next = await fetch(location, {
-            redirect: "manual",
-            headers: { "User-Agent": BROWSER_UA, Accept: "text/html" },
-          });
-          cookies = cookieHeaderFromSetCookies(collectSetCookies(next));
-        }
+      let nextCookies = cookieHeaderFromSetCookies(collectSetCookies(res));
+      if ((res.status === 301 || res.status === 302) && res.headers.get("location")) {
+        const next = await fetch(res.headers.get("location")!, {
+          redirect: "manual",
+          headers: { "User-Agent": BROWSER_UA, Accept: "text/html" },
+        });
+        nextCookies = mergeCookieHeaders(nextCookies, collectSetCookies(next));
       }
-      if (!cookies) throw new Error("no cookie from fc.yahoo.com");
-      return cookies;
+      if (!nextCookies) throw new Error("no cookie from fc.yahoo.com");
+      return nextCookies;
     },
     async () => {
-      const res = await fetch("https://finance.yahoo.com", {
+      const res = await fetch("https://finance.yahoo.com/quote/AAPL", {
         redirect: "follow",
+        headers: yahooHeaders("", "text/html"),
+      });
+      const nextCookies = cookieHeaderFromSetCookies(collectSetCookies(res));
+      if (!nextCookies) throw new Error("no cookie from finance.yahoo.com");
+      return nextCookies;
+    },
+    async () => {
+      const res = await fetch("https://consent.yahoo.com/v2/collectConsent?sessionId=3_cc-session", {
+        redirect: "manual",
         headers: { "User-Agent": BROWSER_UA, Accept: "text/html" },
       });
-      const cookies = cookieHeaderFromSetCookies(collectSetCookies(res));
-      if (!cookies) throw new Error("no cookie from finance.yahoo.com");
-      return cookies;
+      const nextCookies = cookieHeaderFromSetCookies(collectSetCookies(res));
+      if (!nextCookies) throw new Error("no cookie from consent.yahoo.com");
+      return nextCookies;
     },
   ];
 
-  let cookies = "";
   let lastErr: unknown;
   for (const tryCookie of attempts) {
     try {
@@ -90,24 +127,24 @@ async function fetchYahooSession(): Promise<YahooSession> {
     throw new Error(`Yahoo Finance session cookie unavailable: ${lastErr}`);
   }
 
-  const crumbRes = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", {
-    headers: {
-      "User-Agent": BROWSER_UA,
-      Accept: "text/plain",
-      Cookie: cookies,
-    },
-  });
-
-  if (!crumbRes.ok) {
-    throw new Error(`Yahoo Finance crumb request failed (${crumbRes.status}).`);
+  let lastCrumbErr: unknown;
+  for (const host of CRUMB_HOSTS) {
+    try {
+      const crumbRes = await fetch(`${host}/v1/test/getcrumb`, {
+        headers: yahooHeaders(cookies, "text/plain"),
+      });
+      if (!crumbRes.ok) {
+        throw new Error(`crumb request failed (${crumbRes.status})`);
+      }
+      const crumb = (await crumbRes.text()).trim();
+      if (!crumb) throw new Error("empty crumb");
+      return { cookie: cookies, crumb, at: Date.now() };
+    } catch (e) {
+      lastCrumbErr = e;
+    }
   }
 
-  const crumb = (await crumbRes.text()).trim();
-  if (!crumb) {
-    throw new Error("Yahoo Finance returned an empty crumb.");
-  }
-
-  return { cookie: cookies, crumb, at: Date.now() };
+  throw new Error(`Yahoo Finance crumb unavailable: ${lastCrumbErr}`);
 }
 
 function invalidateSession(): void {
@@ -172,13 +209,7 @@ type YahooQuoteResponse = {
 };
 
 async function yahooGet(url: string, session: YahooSession): Promise<Response> {
-  return fetch(url, {
-    headers: {
-      "User-Agent": BROWSER_UA,
-      Accept: "application/json",
-      Cookie: session.cookie,
-    },
-  });
+  return fetch(url, { headers: yahooHeaders(session.cookie) });
 }
 
 function applyQuoteRows(
@@ -196,10 +227,11 @@ function applyQuoteRows(
 
 async function fetchQuoteChunk(
   chunk: string[],
-  session: YahooSession
+  session: YahooSession,
+  host: (typeof QUOTE_HOSTS)[number]
 ): Promise<YahooQuoteResponse> {
   const symbolsParam = chunk.map(encodeURIComponent).join(",");
-  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbolsParam}&crumb=${encodeURIComponent(session.crumb)}`;
+  const url = `${host}/v7/finance/quote?symbols=${symbolsParam}&crumb=${encodeURIComponent(session.crumb)}`;
   const res = await yahooGet(url, session);
   if (res.status === 401 || res.status === 403) {
     throw new Error(`Yahoo auth failed (${res.status}).`);
@@ -215,6 +247,21 @@ async function fetchQuoteChunk(
     throw new Error(String(json.quoteResponse.error.description ?? "Yahoo quote error."));
   }
   return json;
+}
+
+async function fetchQuoteChunkWithFallback(
+  chunk: string[],
+  session: YahooSession
+): Promise<YahooQuoteResponse> {
+  let lastErr: unknown;
+  for (const host of QUOTE_HOSTS) {
+    try {
+      return await fetchQuoteChunk(chunk, session, host);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("Yahoo quote hosts failed.");
 }
 
 /** Batch live quotes — one HTTP call per chunk, serialized globally. */
@@ -238,7 +285,7 @@ async function fetchYahooQuotesLocked(symbols: string[]): Promise<Record<string,
       const session = await getYahooSession();
       for (let i = 0; i < unique.length; i += QUOTE_CHUNK) {
         const chunk = unique.slice(i, i + QUOTE_CHUNK);
-        const json = await fetchQuoteChunk(chunk, session);
+        const json = await fetchQuoteChunkWithFallback(chunk, session);
         applyQuoteRows(out, json);
       }
 
@@ -272,19 +319,27 @@ async function fetchYahooChartLocked(symbolPath: string, query: string): Promise
 
     try {
       const session = await getYahooSession();
-      const url = `https://query2.finance.yahoo.com/v8/finance/chart/${sym}?${query}&crumb=${encodeURIComponent(session.crumb)}`;
-      const res = await yahooGet(url, session);
-      if (res.status === 401 || res.status === 403 || res.status === 429) {
-        throw new Error(`Yahoo chart auth/rate (${res.status}).`);
+      let lastChartErr: unknown;
+      for (const host of QUOTE_HOSTS) {
+        try {
+          const url = `${host}/v8/finance/chart/${sym}?${query}&crumb=${encodeURIComponent(session.crumb)}`;
+          const res = await yahooGet(url, session);
+          if (res.status === 401 || res.status === 403 || res.status === 429) {
+            throw new Error(`Yahoo chart auth/rate (${res.status}).`);
+          }
+          if (!res.ok) {
+            throw new Error(`Yahoo chart failed (${res.status}).`);
+          }
+          const json = (await res.json()) as YahooChartJson;
+          if (json.chart?.error || !json.chart?.result?.length) {
+            throw new Error(json.chart?.error?.description ?? "empty chart result");
+          }
+          return json;
+        } catch (e) {
+          lastChartErr = e;
+        }
       }
-      if (!res.ok) {
-        throw new Error(`Yahoo chart failed (${res.status}).`);
-      }
-      const json = (await res.json()) as YahooChartJson;
-      if (json.chart?.error || !json.chart?.result?.length) {
-        throw new Error(json.chart?.error?.description ?? "empty chart result");
-      }
-      return json;
+      throw lastChartErr instanceof Error ? lastChartErr : new Error("Yahoo chart hosts failed.");
     } catch (e) {
       console.warn(`Yahoo chart ${symbolPath} attempt ${attempt + 1}/${MAX_ATTEMPTS}:`, e);
     }

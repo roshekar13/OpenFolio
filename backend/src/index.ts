@@ -15,7 +15,7 @@ import { buildAnalyticsBundle } from "./analyticsBundle.js";
 import { buildInvestmentIdeasInput } from "./investmentIdeasPayload.js";
 import { INVESTMENT_IDEAS_SYSTEM_INSTRUCTION } from "./investmentIdeasPrompt.js";
 import { geminiGenerateText, getGeminiAnalyticsModelPolicy } from "./gemini.js";
-import { loadWatchlistPayload } from "./watchlistPayload.js";
+import { loadWatchlistPayload, loadWatchlistMomentum, loadWatchlistPayloadWithMomentum } from "./watchlistPayload.js";
 import { registerAuthRoutes, requireAuth } from "./auth.js";
 import {
   parseTransactionsCsv,
@@ -505,6 +505,16 @@ app.get("/api/watchlist", requireAuth, async (req, res) => {
   try {
     const userId = req.session.userId!;
     res.json(await loadWatchlistPayload(getDb(), userId));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.get("/api/watchlist/momentum", requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId!;
+    res.json({ changes: await loadWatchlistMomentum(getDb(), userId) });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: String(e) });

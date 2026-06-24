@@ -114,6 +114,14 @@ export async function fetchWatchlist(): Promise<WatchlistResponse> {
   return (await r.json()) as WatchlistResponse;
 }
 
+export async function fetchWatchlistMomentum(): Promise<Record<string, number | null>> {
+  const r = await apiFetch("/api/watchlist/momentum");
+  if (r.status === 401) throw new Error("UNAUTHORIZED");
+  if (!r.ok) throw new Error("Failed to load watchlist momentum");
+  const j = (await r.json()) as { changes?: Record<string, number | null> };
+  return j.changes ?? {};
+}
+
 export async function putWatchlist(tickers: string[]): Promise<WatchlistResponse> {
   const r = await apiFetch("/api/watchlist", {
     method: "PUT",

@@ -1,40 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import {
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip as RTooltip,
-} from "recharts";
 import type { CapitalOverview, PortfolioResponse, Position, TransactionRow, WatchlistResponse } from "./api";
-import { fetchPortfolio, fetchTransactions, fetchWatchlist, fetchAuthMe, postBulkDeleteTransactions } from "./api";
+import { fetchPortfolio, fetchTransactions, fetchWatchlist, fetchWatchlistMomentum, fetchAuthMe, postBulkDeleteTransactions } from "./api";
 import { setAuthToken } from "./http";
 import { AdvancedAnalyticsPage } from "./components/AdvancedAnalyticsPage";
+import { AllocationPieChart } from "./components/AllocationPieChart";
 import { BuyVsCurrentChart } from "./components/BuyVsCurrentChart";
 import { BrandMark } from "./components/BrandMark";
 import { ImportCsvModal } from "./components/ImportCsvModal";
 import { TransactionModal } from "./components/TransactionModal";
 import { WatchlistPanel } from "./components/WatchlistPanel";
 import { DemoBanner } from "./components/DemoBanner";
+import { SessionOverlay } from "./components/SessionOverlay";
 import { WhyOpenFolioModal } from "./components/WhyOpenFolioModal";
 import { DEMO_PORTFOLIO, DEMO_TRANSACTIONS, DEMO_WATCHLIST } from "./demoPortfolio";
 import { CurrencyProvider, useCurrency } from "./CurrencyContext";
 import { AuthProvider, useAuth } from "./AuthContext";
 import { CompleteProfileModal, UserAccountMenu } from "./components/UserAccountMenu";
 import { fmtPct, fmtSgd, fmtUsd } from "./format";
-
-const COLORS = [
-  "#5eead4",
-  "#7c9cff",
-  "#fbbf24",
-  "#fb7185",
-  "#a78bfa",
-  "#34d399",
-  "#60a5fa",
-  "#f472b6",
-  "#4ade80",
-  "#f97316",
-];
 
 type PageId = "home" | "breakdown" | "ledger" | "analytics";
 
@@ -184,13 +166,7 @@ function HomeView({
   onWatchlistChanged: () => void;
   readOnly?: boolean;
 }) {
-  const { currency, liveFx, toDisplayFromUsd } = useCurrency();
-
-  const pieData = useMemo(() => {
-    return positions
-      .filter((p) => p.marketValueUsd > 0)
-      .map((p) => ({ name: p.ticker, value: toDisplayFromUsd(p.marketValueUsd) }));
-  }, [positions, toDisplayFromUsd]);
+  const { currency, liveFx } = useCurrency();
 
   const xirrSub = useMemo(() => {
     const parts = [`Weighted sum of position XIRR: ${fmtPct(weightedXirr)}`];
@@ -231,34 +207,7 @@ function HomeView({
               By market value ({currency})
             </span>
           </div>
-          {pieData.length === 0 ? (
-            <div style={{ color: "var(--muted)", padding: "2rem 0", textAlign: "center" }}>
-              Add transactions to see allocation.
-            </div>
-          ) : (
-            <div style={{ width: "100%", height: 300 }}>
-              <ResponsiveContainer>
-                <PieChart>
-                  <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={70} outerRadius={110} paddingAngle={2}>
-                    {pieData.map((_, i) => (
-                      <Cell key={i} fill={COLORS[i % COLORS.length]} stroke="rgba(0,0,0,0.25)" />
-                    ))}
-                  </Pie>
-                  <RTooltip
-                    formatter={(v: number) => (currency === "USD" ? fmtUsd(v) : fmtSgd(v, 2))}
-                    contentStyle={{
-                      background: "var(--bg1)",
-                      border: "1px solid var(--stroke)",
-                      borderRadius: 12,
-                      color: "var(--text)",
-                    }}
-                    labelStyle={{ color: "var(--text)" }}
-                    itemStyle={{ color: "var(--text)" }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          )}
+          <AllocationPieChart positions={positions} />
         </div>
 
         <div className="panel">
@@ -551,20 +500,45 @@ export default function App() {
 const SESSION_EXPIRED_MSG = "Your session expired. Please sign in again.";
 
 function AppShell() {
-  const { user, authLoading, authReady, refresh, logout } = useAuth();
+  const { user, authLoading, authReady, sessionBusy, sessionAction, refresh, logout } = useAuth();
   const [page, setPage] = useState<PageId>("home");
   const [data, setData] = useState<PortfolioResponse | null>(null);
   const [tx, setTx] = useState<TransactionRow[] | null>(null);
   const [watchlistData, setWatchlistData] = useState<WatchlistResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [portfolioLoading, setPortfolioLoading] = useState(false);
+  const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
   const [modal, setModal] = useState(false);
   const [editTx, setEditTx] = useState<TransactionRow | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [chartOn, setChartOn] = useState<Record<string, boolean>>({});
   const [whyOpenFolioOpen, setWhyOpenFolioOpen] = useState(false);
   const loadGenerationRef = useRef(0);
-  const prevUserRef = useRef<typeof user>(null);
+  const prevUserIdRef = useRef<string | null>(null);
   const signedOutAtRef = useRef(0);
+
+  const applyWatchlistMomentum = useCallback(
+    (gen: number, changes: Record<string, number | null>) => {
+      if (gen !== loadGenerationRef.current) return;
+      setWatchlistData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          items: prev.items.map((item) => ({
+            ...item,
+            change1moPct: changes[item.ticker] ?? item.change1moPct,
+          })),
+        };
+      });
+    },
+    []
+  );
+
+  const loadWatchlistMomentumOnly = useCallback((gen: number) => {
+    void fetchWatchlistMomentum()
+      .then((changes) => applyWatchlistMomentum(gen, changes))
+      .catch((watchErr) => console.warn("Watchlist momentum load failed:", watchErr));
+  }, [applyWatchlistMomentum]);
 
   const applyDemoState = useCallback(() => {
     setData(DEMO_PORTFOLIO);
@@ -577,12 +551,15 @@ function AppShell() {
     if (!user || user.needsDisplayName) return;
 
     const gen = ++loadGenerationRef.current;
+    setPortfolioLoading(true);
+    setLoadedUserId(null);
     setError(null);
     try {
       const [p, t] = await Promise.all([fetchPortfolio(), fetchTransactions()]);
       if (gen !== loadGenerationRef.current) return;
       setData(p);
       setTx(t);
+      setLoadedUserId(user.id);
     } catch (e) {
       if (gen !== loadGenerationRef.current) return;
       const msg = e instanceof Error ? e.message : "Load failed";
@@ -610,6 +587,7 @@ function AppShell() {
           if (gen !== loadGenerationRef.current) return;
           setData(p);
           setTx(t);
+          setLoadedUserId(user.id);
         } catch (retryErr) {
           if (gen !== loadGenerationRef.current) return;
           const retryMsg = retryErr instanceof Error ? retryErr.message : "Load failed";
@@ -620,17 +598,22 @@ function AppShell() {
         setError(msg);
         return;
       }
+    } finally {
+      if (gen === loadGenerationRef.current) {
+        setPortfolioLoading(false);
+      }
     }
 
     try {
       if (gen !== loadGenerationRef.current) return;
       setWatchlistData(await fetchWatchlist());
+      loadWatchlistMomentumOnly(gen);
     } catch (watchErr) {
       if (gen !== loadGenerationRef.current) return;
       console.warn("Watchlist load failed:", watchErr);
       setWatchlistData({ items: [], max: 4 });
     }
-  }, [user, logout, refresh, applyDemoState]);
+  }, [user, logout, refresh, applyDemoState, loadWatchlistMomentumOnly]);
 
   const refreshPortfolio = useCallback(() => {
     if (!user || user.needsDisplayName) {
@@ -642,34 +625,56 @@ function AppShell() {
 
   const loadWatchlistOnly = useCallback(async () => {
     if (!user || user.needsDisplayName) return;
+    const gen = loadGenerationRef.current;
     try {
       setWatchlistData(await fetchWatchlist());
+      loadWatchlistMomentumOnly(gen);
     } catch {
       /* ignore */
     }
-  }, [user]);
+  }, [user, loadWatchlistMomentumOnly]);
 
   useEffect(() => {
     if (authLoading || !authReady) return;
+    const userId = user?.id ?? null;
     if (!user) {
-      if (prevUserRef.current) signedOutAtRef.current = Date.now();
-      prevUserRef.current = null;
+      if (prevUserIdRef.current) signedOutAtRef.current = Date.now();
+      prevUserIdRef.current = null;
       loadGenerationRef.current += 1;
       setAuthToken(null);
+      setLoadedUserId(null);
+      setPortfolioLoading(false);
       applyDemoState();
       return;
     }
-    prevUserRef.current = user;
     if (user.needsDisplayName) {
+      if (prevUserIdRef.current !== userId) {
+        prevUserIdRef.current = userId;
+        loadGenerationRef.current += 1;
+      }
+      setData(null);
+      setTx(null);
+      setWatchlistData(null);
+      setLoadedUserId(null);
+      setPortfolioLoading(false);
+      setError(null);
+      return;
+    }
+    if (prevUserIdRef.current !== userId) {
+      prevUserIdRef.current = userId;
       loadGenerationRef.current += 1;
       setData(null);
       setTx(null);
       setWatchlistData(null);
+      setLoadedUserId(null);
       setError(null);
+      void load();
       return;
     }
-    void load();
-  }, [authLoading, authReady, user, load, applyDemoState]);
+    if (!user.needsDisplayName && loadedUserId !== userId && !portfolioLoading) {
+      void load();
+    }
+  }, [authLoading, authReady, user, loadedUserId, portfolioLoading, load, applyDemoState]);
 
   useEffect(() => {
     const positions = data?.positions;
@@ -695,9 +700,23 @@ function AppShell() {
   const positions = data?.positions ?? [];
   const isDemo = !user && authReady && !authLoading;
   const portfolioReady = Boolean(
-    (isDemo && data && tx !== null) || (user && !user.needsDisplayName && data && tx !== null)
+    (isDemo && data && tx !== null) ||
+      (user && !user.needsDisplayName && data && tx !== null && loadedUserId === user.id)
   );
-  const headerActionsDisabled = !user || Boolean(user.needsDisplayName);
+  const uiBlocked =
+    authLoading ||
+    sessionBusy ||
+    (Boolean(user) && !user?.needsDisplayName && (portfolioLoading || loadedUserId !== user?.id));
+  const overlayMessage = sessionBusy
+    ? sessionAction === "logout"
+      ? "Signing out…"
+      : sessionAction === "register"
+        ? "Creating account…"
+        : "Signing in…"
+    : authLoading
+      ? "Checking session…"
+      : "Loading your portfolio…";
+  const headerActionsDisabled = !user || Boolean(user.needsDisplayName) || uiBlocked;
 
   const homePageTitle = useMemo(() => {
     if (isDemo) return "Sample Investment Portfolio";
@@ -733,7 +752,8 @@ function AppShell() {
   return (
     <CurrencyProvider liveFx={data?.liveFxSgdPerUsd ?? null}>
       <CompleteProfileModal />
-      <div className="app-shell">
+      {uiBlocked && <SessionOverlay message={overlayMessage} />}
+      <div className={"app-shell" + (uiBlocked ? " app-shell-blocked" : "")}>
         <aside className="sidebar" aria-label="Primary">
           <div className="sidebar-brand">
             <BrandMark size={40} />
@@ -750,6 +770,7 @@ function AppShell() {
                   key={item.id}
                   type="button"
                   className={"sidebar-link" + (active ? " sidebar-link-active" : "")}
+                  disabled={uiBlocked}
                   onClick={() => setPage(item.id)}
                 >
                   <span className="sidebar-link-label">{item.label}</span>
@@ -760,6 +781,7 @@ function AppShell() {
             <button
               type="button"
               className="sidebar-trust-btn"
+              disabled={uiBlocked}
               onClick={() => setWhyOpenFolioOpen(true)}
             >
               why OpenFolio?
@@ -780,19 +802,13 @@ function AppShell() {
           {error && <div className="banner-error">{error}</div>}
 
           <main className="main-content">
-            {authLoading && <p style={{ color: "var(--muted)" }}>Checking session…</p>}
-
             {isDemo && <DemoBanner />}
 
             {!authLoading && user && user.needsDisplayName && (
               <p style={{ color: "var(--muted)" }}>Add your name in the dialog above to continue.</p>
             )}
 
-            {!authLoading && user && !user.needsDisplayName && !portfolioReady && !error && (
-              <p style={{ color: "var(--muted)" }}>Loading portfolio…</p>
-            )}
-
-            {portfolioReady && data && tx !== null && page === "home" && c && (
+            {!uiBlocked && portfolioReady && data && tx !== null && page === "home" && c && (
               <HomeView
                 c={c}
                 weightedXirr={weightedXirr}

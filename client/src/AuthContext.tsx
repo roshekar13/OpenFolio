@@ -24,6 +24,8 @@ type AuthContextValue = {
   user: AuthUser | null;
   authLoading: boolean;
   authReady: boolean;
+  sessionBusy: boolean;
+  sessionAction: "login" | "logout" | "register" | null;
   refresh: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, displayName?: string) => Promise<void>;
@@ -40,6 +42,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
+  const [sessionBusy, setSessionBusy] = useState(false);
+  const [sessionAction, setSessionAction] = useState<"login" | "logout" | "register" | null>(null);
 
   const refresh = useCallback(async () => {
     setAuthReady(false);
@@ -65,37 +69,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const login = useCallback(async (email: string, password: string) => {
-    const { user: signedIn, token } = await postAuthLogin(email, password);
-    setAuthToken(token);
-    setUser(signedIn);
-    const { user: verified } = await fetchAuthMe();
-    if (!verified) {
-      setAuthToken(null);
-      setUser(null);
-      throw new Error("Sign-in succeeded but the session could not be verified. Please try again.");
+    setSessionAction("login");
+    setSessionBusy(true);
+    try {
+      const { user: signedIn, token } = await postAuthLogin(email, password);
+      setAuthToken(token);
+      setUser(signedIn);
+      const { user: verified } = await fetchAuthMe();
+      if (!verified) {
+        setAuthToken(null);
+        setUser(null);
+        throw new Error("Sign-in succeeded but the session could not be verified. Please try again.");
+      }
+      setUser(verified);
+    } finally {
+      setSessionBusy(false);
+      setSessionAction(null);
     }
-    setUser(verified);
   }, []);
 
   const register = useCallback(async (email: string, password: string, displayName?: string) => {
-    const { user: created, token } = await postAuthRegister(email, password, displayName);
-    setAuthToken(token);
-    setUser(created);
-    const { user: verified } = await fetchAuthMe();
-    if (!verified) {
-      setAuthToken(null);
-      setUser(null);
-      throw new Error("Account created but the session could not be verified. Please sign in.");
+    setSessionAction("register");
+    setSessionBusy(true);
+    try {
+      const { user: created, token } = await postAuthRegister(email, password, displayName);
+      setAuthToken(token);
+      setUser(created);
+      const { user: verified } = await fetchAuthMe();
+      if (!verified) {
+        setAuthToken(null);
+        setUser(null);
+        throw new Error("Account created but the session could not be verified. Please sign in.");
+      }
+      setUser(verified);
+    } finally {
+      setSessionBusy(false);
+      setSessionAction(null);
     }
-    setUser(verified);
   }, []);
 
   const logout = useCallback(async () => {
+    setSessionAction("logout");
+    setSessionBusy(true);
     try {
-      await postAuthLogout();
+      try {
+        await postAuthLogout();
+      } finally {
+        setAuthToken(null);
+        setUser(null);
+      }
     } finally {
-      setAuthToken(null);
-      setUser(null);
+      setSessionBusy(false);
+      setSessionAction(null);
     }
   }, []);
 
@@ -119,6 +144,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       authLoading,
       authReady,
+      sessionBusy,
+      sessionAction,
       refresh,
       login,
       register,
@@ -128,7 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       updateProfile,
       updateTheme,
     }),
-    [user, authLoading, authReady, refresh, login, register, logout, updateDisplayName, updateProfile, updateTheme]
+    [user, authLoading, authReady, sessionBusy, sessionAction, refresh, login, register, logout, updateDisplayName, updateProfile, updateTheme]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

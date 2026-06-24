@@ -3,7 +3,7 @@ import type { TransactionRow } from "./portfolio.js";
 import { buildPortfolio } from "./portfolio.js";
 import { fetchPrices } from "./prices.js";
 import { listWatchlistTickers } from "./mongo/watchlist.js";
-import { loadWatchlistPayload } from "./watchlistPayload.js";
+import { loadWatchlistPayloadWithMomentum } from "./watchlistPayload.js";
 import { listUserTransactions } from "./mongo/transactions.js";
 
 /**
@@ -27,7 +27,7 @@ export async function buildAnalyticsBundle(
   const allSymbols = [...new Set([...tickers, ...watchlistTickers, "USDSGD=X"])];
   const prices = await fetchPrices(allSymbols);
   const liveFxSgdPerUsd = prices["USDSGD=X"] ?? null;
-  const watchlist = await loadWatchlistPayload(db, userId, prices);
+  const watchlist = await loadWatchlistPayloadWithMomentum(db, userId, prices);
   const { positions, capital } = buildPortfolio(rows, prices);
   return {
     generatedAt: new Date().toISOString(),
