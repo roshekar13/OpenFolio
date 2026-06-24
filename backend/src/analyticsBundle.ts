@@ -1,7 +1,8 @@
 import type { Db } from "mongodb";
 import type { TransactionRow } from "./portfolio.js";
 import { buildPortfolio } from "./portfolio.js";
-import { fetchPrices, fetchUsdSgdLive } from "./prices.js";
+import { fetchPrices } from "./prices.js";
+import { listWatchlistTickers } from "./mongo/watchlist.js";
 import { loadWatchlistPayload } from "./watchlistPayload.js";
 import { listUserTransactions } from "./mongo/transactions.js";
 
@@ -22,11 +23,11 @@ export async function buildAnalyticsBundle(
 }> {
   const rows = await listUserTransactions(db, userId);
   const tickers = [...new Set(rows.map((r) => r.ticker.trim().toUpperCase()))];
-  const [prices, liveFxSgdPerUsd, watchlist] = await Promise.all([
-    fetchPrices(tickers),
-    fetchUsdSgdLive(),
-    loadWatchlistPayload(db, userId),
-  ]);
+  const watchlistTickers = await listWatchlistTickers(db, userId);
+  const allSymbols = [...new Set([...tickers, ...watchlistTickers, "USDSGD=X"])];
+  const prices = await fetchPrices(allSymbols);
+  const liveFxSgdPerUsd = prices["USDSGD=X"] ?? null;
+  const watchlist = await loadWatchlistPayload(db, userId, prices);
   const { positions, capital } = buildPortfolio(rows, prices);
   return {
     generatedAt: new Date().toISOString(),

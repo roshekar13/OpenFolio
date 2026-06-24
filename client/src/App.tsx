@@ -537,10 +537,10 @@ function AppShell() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [p, t, w] = await Promise.all([fetchPortfolio(), fetchTransactions(), fetchWatchlist()]);
+      const [p, t] = await Promise.all([fetchPortfolio(), fetchTransactions()]);
       setData(p);
       setTx(t);
-      setWatchlistData(w);
+      setWatchlistData(await fetchWatchlist());
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Load failed";
       if (msg === "UNAUTHORIZED") {
@@ -555,10 +555,10 @@ function AppShell() {
           return;
         }
         try {
-          const [p, t, w] = await Promise.all([fetchPortfolio(), fetchTransactions(), fetchWatchlist()]);
+          const [p, t] = await Promise.all([fetchPortfolio(), fetchTransactions()]);
           setData(p);
           setTx(t);
-          setWatchlistData(w);
+          setWatchlistData(await fetchWatchlist());
           return;
         } catch (retryErr) {
           const retryMsg = retryErr instanceof Error ? retryErr.message : "Load failed";

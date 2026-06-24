@@ -53,6 +53,7 @@ import {
   isCrossOriginDeployment,
   shouldTrustProxy,
 } from "./httpConfig.js";
+import { warmYahooSession } from "./yahooFinance.js";
 
 loadServerEnv();
 
@@ -518,9 +519,10 @@ app.get("/api/portfolio", requireAuth, async (req, res) => {
     const userId = req.session.userId!;
     const rows = await listUserTransactions(getDb(), userId);
     const tickers = [...new Set(rows.map((r) => r.ticker.trim().toUpperCase()))];
-    const prices = await fetchPrices(tickers);
+    const allSymbols = [...new Set([...tickers, "USDSGD=X"])];
+    const prices = await fetchPrices(allSymbols);
     const { positions, capital } = buildPortfolio(rows, prices);
-    const liveFxSgdPerUsd = await fetchUsdSgdLive();
+    const liveFxSgdPerUsd = prices["USDSGD=X"] ?? null;
     res.json({
       capital,
       positions,
@@ -557,6 +559,8 @@ if (serveClient) {
 async function start(): Promise<void> {
   const db = await connectDb();
   registerAuthRoutes(app, db);
+  void warmYahooSession();
+  setInterval(() => void warmYahooSession(), 25 * 60 * 1000);
   app.listen(port, host, () => {
     const label = serveClient ? "OpenFolio (API + web UI)" : "OpenFolio API";
     console.log(`${label} listening on http://${host}:${port}`);
