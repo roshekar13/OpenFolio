@@ -43,16 +43,49 @@ function MoneyCard({ label, usdAmount, hint }: { label: string; usdAmount: numbe
   );
 }
 
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function InfoButton({ description, label }: { description: string; label: string }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className="info-tip-wrap">
+      <button
+        type="button"
+        className="info-tip-btn"
+        aria-label={`About ${label}`}
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        i
+      </button>
+      {open && (
+        <div className="info-tip-popover" role="dialog" aria-label={label}>
+          <p>{description}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ label, value, info }: { label: string; value: string; info?: string }) {
   return (
     <div className="card-surface">
-      <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 6 }}>{label}</div>
+      <div className="stat-card-label-row">
+        <div style={{ color: "var(--muted)", fontSize: 13 }}>{label}</div>
+        {info && <InfoButton label={label} description={info} />}
+      </div>
       <div className="mono" style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-0.02em" }}>
         {value}
       </div>
-      {sub && (
-        <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 8, lineHeight: 1.4 }}>{sub}</div>
-      )}
     </div>
   );
 }
@@ -147,9 +180,14 @@ function MainHeader({
   );
 }
 
+const PORTFOLIO_XIRR_INFO =
+  "Money-weighted annualized return for your whole portfolio. OpenFolio builds a cash-flow series from every buy (outflow), sell (inflow), and today’s total market value, then solves for the internal rate of return (XIRR).";
+
+const AVG_HOLDING_GROWTH_INFO =
+  "Simple average of each open holding’s annualized return (XIRR). Every position counts equally, regardless of size — unlike Portfolio XIRR, which weights all portfolio cash flows together.";
+
 function HomeView({
   c,
-  weightedXirr,
   positions,
   watchlistData,
   chartOn,
@@ -158,7 +196,6 @@ function HomeView({
   readOnly = false,
 }: {
   c: CapitalOverview;
-  weightedXirr: number;
   positions: Position[];
   watchlistData: WatchlistResponse | null;
   chartOn: Record<string, boolean>;
@@ -166,17 +203,7 @@ function HomeView({
   onWatchlistChanged: () => void;
   readOnly?: boolean;
 }) {
-  const { currency, liveFx } = useCurrency();
-
-  const xirrSub = useMemo(() => {
-    const parts = [`Weighted sum of position XIRR: ${fmtPct(weightedXirr)}`];
-    if (currency === "SGD" && liveFx != null) {
-      parts.push(`Display uses today’s spot ${liveFx.toFixed(4)} SGD/USD`);
-    }
-    return parts.join(" · ");
-  }, [weightedXirr, currency, liveFx]);
-
-  const avgHoldingSub = "Mean of each holding’s XIRR (equal weight). Differs from money-weighted portfolio XIRR.";
+  const { currency } = useCurrency();
 
   return (
     <>
@@ -192,8 +219,12 @@ function HomeView({
           <MoneyCard label="Current portfolio value" usdAmount={c.currentPortfolioValueUsd} />
           <MoneyCard label="Net gain / loss" usdAmount={c.netGainLossUsd} hint="Versus remaining cost basis." />
           <MoneyCard label="Total invested (cost basis)" usdAmount={c.totalInvestedCapitalUsd} />
-          <StatCard label="Portfolio XIRR" value={fmtPct(c.portfolioXirr)} sub={xirrSub} />
-          <StatCard label="Avg. annual growth (holdings)" value={fmtPct(c.averageHoldingXirr)} sub={avgHoldingSub} />
+          <StatCard label="Portfolio XIRR" value={fmtPct(c.portfolioXirr)} info={PORTFOLIO_XIRR_INFO} />
+          <StatCard
+            label="Avg. annual growth (holdings)"
+            value={fmtPct(c.averageHoldingXirr)}
+            info={AVG_HOLDING_GROWTH_INFO}
+          />
         </div>
       </section>
 
@@ -727,11 +758,6 @@ function AppShell() {
     });
   }, [data?.positions]);
 
-  const weightedXirr = useMemo(() => {
-    if (!data) return 0;
-    return data.positions.reduce((acc, p) => acc + p.weightedXirrContribution, 0);
-  }, [data]);
-
   const c = data?.capital;
   const positions = data?.positions ?? [];
   const isDemo = !user && authReady && !authLoading;
@@ -847,7 +873,6 @@ function AppShell() {
             {!uiBlocked && portfolioReady && data && tx !== null && page === "home" && c && (
               <HomeView
                 c={c}
-                weightedXirr={weightedXirr}
                 positions={positions}
                 watchlistData={watchlistData}
                 chartOn={chartOn}
