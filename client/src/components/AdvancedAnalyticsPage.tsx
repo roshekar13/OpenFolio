@@ -19,6 +19,7 @@ import {
   fetchAnalyticsReports,
   postAnalyzePortfolio,
   postInvestmentIdeas,
+  postSaveAnalyticsReport,
 } from "../api";
 
 type LoadingKind = "analyze" | "ideas";
@@ -51,7 +52,7 @@ class MarkdownSafeBoundary extends Component<
   }
 }
 
-function ResultBlock({ title, body }: { title: string; body: string }) {
+function MarkdownBody({ body }: { body: string }) {
   const fallback = (
     <div
       className="analytics-md-fallback"
@@ -68,6 +69,18 @@ function ResultBlock({ title, body }: { title: string; body: string }) {
   );
 
   return (
+    <MarkdownSafeBoundary key={`${body.length}:${body.slice(0, 120)}`} fallback={fallback}>
+      <div className="analytics-md">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+          {body}
+        </ReactMarkdown>
+      </div>
+    </MarkdownSafeBoundary>
+  );
+}
+
+function ResultBlock({ title, body }: { title: string; body: string }) {
+  return (
     <div
       className="panel"
       style={{
@@ -78,13 +91,85 @@ function ResultBlock({ title, body }: { title: string; body: string }) {
       <h2 className="section-title" style={{ margin: "0 0 12px" }}>
         {title}
       </h2>
-      <MarkdownSafeBoundary key={`${title}:${body.length}:${body.slice(0, 120)}`} fallback={fallback}>
-        <div className="analytics-md">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-            {body}
-          </ReactMarkdown>
+      <MarkdownBody body={body} />
+    </div>
+  );
+}
+
+function SavedReportModal({
+  report,
+  onClose,
+  onDelete,
+}: {
+  report: AnalyticsReportDetail;
+  onClose: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal
+      aria-labelledby="saved-report-title"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.55)",
+        display: "grid",
+        placeItems: "center",
+        zIndex: 80,
+        padding: 16,
+      }}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        style={{
+          width: "min(720px, 100%)",
+          maxHeight: "min(85vh, 820px)",
+          overflowY: "auto",
+          background: "var(--bg1)",
+          border: "1px solid var(--stroke)",
+          borderRadius: 18,
+          padding: "1.25rem 1.35rem",
+          boxShadow: "var(--shadow)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 12,
+            marginBottom: 14,
+          }}
+        >
+          <div>
+            <div
+              id="saved-report-title"
+              className="mono"
+              style={{ fontSize: 13, color: "var(--muted)", marginBottom: 4 }}
+            >
+              {formatWhen(report.createdAt)}
+            </div>
+            <div style={{ fontSize: 17, fontWeight: 650 }}>{kindLabel(report.kind)}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <button
+              type="button"
+              className="btn-ghost"
+              style={{ padding: "6px 10px", fontSize: 12 }}
+              onClick={() => void onDelete()}
+            >
+              Delete
+            </button>
+            <button type="button" className="btn-ghost" style={{ padding: "6px 10px" }} onClick={onClose}>
+              Close
+            </button>
+          </div>
         </div>
-      </MarkdownSafeBoundary>
+        <MarkdownBody body={report.body} />
+      </div>
     </div>
   );
 }
@@ -114,12 +199,10 @@ export function AdvancedAnalyticsPage() {
   const [loading, setLoading] = useState<LoadingKind | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [modelPolicy, setModelPolicy] = useState<string | null>(null);
-  const [pdfBusy, setPdfBusy] = useState(false);
+  const [downloadBusy, setDownloadBusy] = useState(false);
   const [reports, setReports] = useState<AnalyticsReportSummary[]>([]);
   const [reportsErr, setReportsErr] = useState<string | null>(null);
-  const [activeReportId, setActiveReportId] = useState<string | null>(null);
-  const [comparePrevious, setComparePrevious] = useState<AnalyticsReportDetail | null>(null);
-  const [showCompare, setShowCompare] = useState(false);
+  const [popupReport, setPopupReport] = useState<AnalyticsReportDetail | null>(null);
   const analyticsPdfRef = useRef<HTMLDivElement>(null);
 
   const reloadReports = useCallback(async () => {
@@ -148,109 +231,81 @@ export function AdvancedAnalyticsPage() {
 
   const staleReminder = useMemo(() => {
     const latestAnalysis = reports.find((r) => r.kind === "portfolio_analysis");
-    if (!latestAnalysis) {
-      return "You have not saved a portfolio analysis yet. Run Analyze portfolio to create your first report.";
-    }
+    if (!latestAnalysis) return null;
     const days = daysSince(latestAnalysis.createdAt);
     if (days >= STALE_DAYS) {
-      return `Your last portfolio analysis was ${days} days ago (${formatWhen(latestAnalysis.createdAt)}). Consider refreshing your review.`;
+      return `Your last saved portfolio analysis was ${days} days ago (${formatWhen(latestAnalysis.createdAt)}). Consider running a fresh review.`;
     }
     return null;
   }, [reports]);
 
   const busy = loading !== null;
 
-  const applyReportToView = (report: AnalyticsReportDetail, previous: AnalyticsReportDetail | null) => {
-    setActiveReportId(report.id);
-    setComparePrevious(previous);
-    setShowCompare(false);
-    if (report.kind === "portfolio_analysis") {
-      setPortfolioAnalysis(report.body);
-    } else {
-      setInvestmentIdeas(report.body);
-    }
-  };
-
-  const openSavedReport = useCallback(async (id: string) => {
-    setErr(null);
-    try {
-      const { report, previous } = await fetchAnalyticsReport(id);
-      applyReportToView(report, previous);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not open report.");
-    }
-  }, []);
-
   const runAnalyze = useCallback(async () => {
     setErr(null);
     setLoading("analyze");
     try {
-      const { analysis, reportId } = await postAnalyzePortfolio();
+      const { analysis } = await postAnalyzePortfolio();
       setPortfolioAnalysis(analysis);
-      setActiveReportId(reportId);
-      setComparePrevious(null);
-      setShowCompare(false);
-      await reloadReports();
-      const { previous } = await fetchAnalyticsReport(reportId);
-      setComparePrevious(previous);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Analysis failed.");
     } finally {
       setLoading(null);
     }
-  }, [reloadReports]);
+  }, []);
 
   const runIdeas = useCallback(async () => {
     setErr(null);
     setLoading("ideas");
     try {
-      const { ideas, reportId } = await postInvestmentIdeas();
+      const { ideas } = await postInvestmentIdeas();
       setInvestmentIdeas(ideas);
-      setActiveReportId(reportId);
-      setComparePrevious(null);
-      setShowCompare(false);
-      await reloadReports();
-      const { previous } = await fetchAnalyticsReport(reportId);
-      setComparePrevious(previous);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not load investment ideas.");
     } finally {
       setLoading(null);
     }
-  }, [reloadReports]);
+  }, []);
 
   const clearView = useCallback(() => {
     if (busy) return;
     setPortfolioAnalysis(null);
     setInvestmentIdeas(null);
-    setActiveReportId(null);
-    setComparePrevious(null);
-    setShowCompare(false);
     setErr(null);
   }, [busy]);
+
+  const openSavedReport = useCallback(async (id: string) => {
+    setErr(null);
+    try {
+      const { report } = await fetchAnalyticsReport(id);
+      setPopupReport(report);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not open report.");
+    }
+  }, []);
 
   const removeReport = useCallback(
     async (id: string) => {
       if (!window.confirm("Delete this saved report?")) return;
       try {
         await deleteAnalyticsReport(id);
-        if (activeReportId === id) clearView();
+        if (popupReport?.id === id) setPopupReport(null);
         await reloadReports();
       } catch (e) {
         window.alert(e instanceof Error ? e.message : "Delete failed.");
       }
     },
-    [activeReportId, clearView, reloadReports]
+    [popupReport?.id, reloadReports]
   );
 
-  const downloadAnalyticsPdf = useCallback(async () => {
+  const downloadReport = useCallback(async () => {
     const el = analyticsPdfRef.current;
     const hasP = Boolean(portfolioAnalysis?.trim());
     const hasI = Boolean(investmentIdeas?.trim());
     if (!el || (!hasP && !hasI)) return;
     const filename =
       hasP && hasI ? "openfolio-analytics.pdf" : hasP ? "openfolio-portfolio-analysis.pdf" : "openfolio-investment-ideas.pdf";
-    setPdfBusy(true);
+    setDownloadBusy(true);
     try {
       const { default: html2pdf } = await import("html2pdf.js");
       const injectPdfStyles = (clonedDoc: Document) => {
@@ -314,201 +369,171 @@ export function AdvancedAnalyticsPage() {
         })
         .from(el)
         .save();
+
+      if (hasP && portfolioAnalysis) {
+        await postSaveAnalyticsReport("portfolio_analysis", portfolioAnalysis);
+      }
+      if (hasI && investmentIdeas) {
+        await postSaveAnalyticsReport("investment_ideas", investmentIdeas);
+      }
+      await reloadReports();
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : "Could not create PDF.");
+      window.alert(e instanceof Error ? e.message : "Could not download or save report.");
     } finally {
-      setPdfBusy(false);
+      setDownloadBusy(false);
     }
-  }, [portfolioAnalysis, investmentIdeas]);
+  }, [portfolioAnalysis, investmentIdeas, reloadReports]);
 
   const hasPortfolioText = Boolean(portfolioAnalysis?.trim());
   const hasInvestmentIdeasText = Boolean(investmentIdeas?.trim());
-  const hasPdfContent = hasPortfolioText || hasInvestmentIdeasText;
+  const hasReportContent = hasPortfolioText || hasInvestmentIdeasText;
 
   return (
     <section>
-      <p style={{ color: "var(--muted)", marginTop: 0, marginBottom: 10, lineHeight: 1.5, maxWidth: 720 }}>
-        Server-side Google Gemini reads your OpenFolio snapshot (same data as Home / Breakdown / Ledger). Not
-        financial advice. Requires <span className="mono">GEMINI_API_KEY</span>.
-        {modelPolicy ? (
-          <>
-            {" "}
-            <span className="mono" style={{ color: "var(--text)" }}>
-              {modelPolicy}
-            </span>
-          </>
-        ) : null}
-      </p>
-      <p style={{ color: "var(--muted)", marginTop: 0, marginBottom: 16, lineHeight: 1.5, fontSize: 13, maxWidth: 720 }}>
-        <strong style={{ color: "var(--text)" }}>Analyze portfolio</strong> reviews your trades and positioning in
-        plain language. <strong style={{ color: "var(--text)" }}>Investment Ideas</strong> sends a structured snapshot of your book and
-        equity-only trade patterns to Gemini (FX/currency instruments excluded), then surfaces adjacent quality and
-        growth names you do not already hold. Each run is saved automatically (up to 30 per type).
-      </p>
-
-      {staleReminder && (
-        <div
-          style={{
-            marginBottom: 14,
-            padding: "10px 14px",
-            borderRadius: 12,
-            border: "1px solid rgba(251,191,36,0.35)",
-            background: "rgba(251,191,36,0.1)",
-            color: "var(--text)",
-            fontSize: 13,
-            lineHeight: 1.5,
-            maxWidth: 720,
-          }}
-        >
-          {staleReminder}
-        </div>
-      )}
-
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        <button type="button" className="btn-primary" disabled={busy} onClick={() => void runAnalyze()}>
-          {loading === "analyze" ? "Analyzing…" : "Analyze portfolio"}
-        </button>
-        <button type="button" className="btn-primary" disabled={busy} onClick={() => void runIdeas()}>
-          {loading === "ideas" ? "Generating…" : "Investment Ideas"}
-        </button>
-        <button type="button" className="btn-ghost" disabled={busy} onClick={clearView}>
-          Clear view
-        </button>
-      </div>
-
-      <div className="panel" style={{ marginTop: 20, padding: "1rem 1.25rem" }}>
-        <h2 className="section-title" style={{ margin: "0 0 10px" }}>
-          Saved reports
-        </h2>
-        {reportsErr && (
-          <p style={{ color: "var(--danger)", fontSize: 13 }}>{reportsErr}</p>
-        )}
-        {!reportsErr && reports.length === 0 && (
-          <p style={{ color: "var(--muted)", fontSize: 13, margin: 0 }}>No saved reports yet.</p>
-        )}
-        {reports.length > 0 && (
-          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
-            {reports.map((r) => (
-              <li
-                key={r.id}
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: 10,
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  border: "1px solid " + (activeReportId === r.id ? "rgba(94,234,212,0.45)" : "var(--stroke)"),
-                  background: activeReportId === r.id ? "rgba(94,234,212,0.08)" : "rgba(255,255,255,0.02)",
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => void openSavedReport(r.id)}
-                  style={{
-                    flex: 1,
-                    textAlign: "left",
-                    border: "none",
-                    background: "transparent",
-                    color: "var(--text)",
-                    padding: 0,
-                    cursor: "pointer",
-                  }}
-                >
-                  <div style={{ fontWeight: 600, fontSize: 14 }}>{kindLabel(r.kind)}</div>
-                  <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 2 }}>{formatWhen(r.createdAt)}</div>
-                  <div
-                    style={{
-                      color: "var(--muted)",
-                      fontSize: 12,
-                      marginTop: 6,
-                      lineHeight: 1.4,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {r.preview}
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  style={{ padding: "4px 8px", fontSize: 12, flexShrink: 0 }}
-                  onClick={() => void removeReport(r.id)}
-                >
-                  Delete
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {err && (
-        <div
-          style={{
-            marginTop: 16,
-            padding: "12px 14px",
-            borderRadius: 12,
-            background: "rgba(251,113,133,0.12)",
-            border: "1px solid rgba(251,113,133,0.35)",
-            color: "#fecdd3",
-            fontSize: 14,
-            lineHeight: 1.45,
-          }}
-        >
-          {err}
-        </div>
-      )}
-
-      <div style={{ marginTop: 8, paddingBottom: 32 }}>
-        {hasPdfContent && (
-          <>
-            <div ref={analyticsPdfRef} data-pdf-capture="analytics-export">
-              {hasPortfolioText && portfolioAnalysis && (
-                <ResultBlock title="Portfolio analysis" body={portfolioAnalysis} />
-              )}
-              {hasInvestmentIdeasText && investmentIdeas && (
-                <ResultBlock title="Investment ideas" body={investmentIdeas} />
-              )}
-            </div>
-            {comparePrevious && (
-              <div style={{ marginTop: 10 }}>
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  style={{ padding: "8px 12px", fontSize: 13 }}
-                  onClick={() => setShowCompare((v) => !v)}
-                >
-                  {showCompare ? "Hide" : "Compare with"} previous ({formatWhen(comparePrevious.createdAt)})
-                </button>
-                {showCompare && (
-                  <ResultBlock
-                    title={`Previous ${kindLabel(comparePrevious.kind).toLowerCase()}`}
-                    body={comparePrevious.body}
-                  />
-                )}
-              </div>
-            )}
-            <div style={{ display: "flex", justifyContent: "flex-start", marginTop: 10 }}>
-              <button
-                type="button"
-                className="btn-ghost"
-                disabled={pdfBusy}
-                style={{ padding: "8px 12px", fontSize: 13 }}
-                onClick={() => void downloadAnalyticsPdf()}
-              >
-                {pdfBusy ? "Preparing PDF…" : "Download PDF"}
-              </button>
-            </div>
-          </>
-        )}
-        {!hasPdfContent && !busy && !err && (
-          <p style={{ color: "var(--muted)", marginTop: 24 }}>
-            Choose an action above or open a saved report from history.
+      <div className="analytics-layout">
+        <div className="analytics-main">
+          <p style={{ color: "var(--muted)", marginTop: 0, marginBottom: 10, lineHeight: 1.5, maxWidth: 720 }}>
+            Server-side Google Gemini reads your OpenFolio snapshot (same data as Home / Breakdown / Ledger). Not
+            financial advice. Requires <span className="mono">GEMINI_API_KEY</span>.
+            {modelPolicy ? (
+              <>
+                {" "}
+                <span className="mono" style={{ color: "var(--text)" }}>
+                  {modelPolicy}
+                </span>
+              </>
+            ) : null}
           </p>
-        )}
+          <p
+            style={{
+              color: "var(--muted)",
+              marginTop: 0,
+              marginBottom: 16,
+              lineHeight: 1.5,
+              fontSize: 13,
+              maxWidth: 720,
+            }}
+          >
+            <strong style={{ color: "var(--text)" }}>Analyze portfolio</strong> reviews your trades and positioning in
+            plain language. <strong style={{ color: "var(--text)" }}>Investment Ideas</strong> sends a structured
+            snapshot of your book and equity-only trade patterns to Gemini (FX/currency instruments excluded), then
+            surfaces adjacent quality and growth names you do not already hold. Use{" "}
+            <strong style={{ color: "var(--text)" }}>Download report</strong> to save a PDF locally and store the text
+            in your account.
+          </p>
+
+          {staleReminder && (
+            <div
+              style={{
+                marginBottom: 14,
+                padding: "10px 14px",
+                borderRadius: 12,
+                border: "1px solid rgba(251,191,36,0.35)",
+                background: "rgba(251,191,36,0.1)",
+                color: "var(--text)",
+                fontSize: 13,
+                lineHeight: 1.5,
+                maxWidth: 720,
+              }}
+            >
+              {staleReminder}
+            </div>
+          )}
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+            <button type="button" className="btn-primary" disabled={busy} onClick={() => void runAnalyze()}>
+              {loading === "analyze" ? "Analyzing…" : "Analyze portfolio"}
+            </button>
+            <button type="button" className="btn-primary" disabled={busy} onClick={() => void runIdeas()}>
+              {loading === "ideas" ? "Generating…" : "Investment Ideas"}
+            </button>
+            <button type="button" className="btn-ghost" disabled={busy} onClick={clearView}>
+              Clear view
+            </button>
+          </div>
+
+          {err && (
+            <div
+              style={{
+                marginTop: 16,
+                padding: "12px 14px",
+                borderRadius: 12,
+                background: "rgba(251,113,133,0.12)",
+                border: "1px solid rgba(251,113,133,0.35)",
+                color: "#fecdd3",
+                fontSize: 14,
+                lineHeight: 1.45,
+              }}
+            >
+              {err}
+            </div>
+          )}
+
+          <div style={{ marginTop: 8, paddingBottom: 32 }}>
+            {hasReportContent && (
+              <>
+                <div ref={analyticsPdfRef} data-pdf-capture="analytics-export">
+                  {hasPortfolioText && portfolioAnalysis && (
+                    <ResultBlock title="Portfolio analysis" body={portfolioAnalysis} />
+                  )}
+                  {hasInvestmentIdeasText && investmentIdeas && (
+                    <ResultBlock title="Investment ideas" body={investmentIdeas} />
+                  )}
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-start", marginTop: 10 }}>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    disabled={downloadBusy}
+                    style={{ padding: "8px 12px", fontSize: 13 }}
+                    onClick={() => void downloadReport()}
+                  >
+                    {downloadBusy ? "Saving report…" : "Download report"}
+                  </button>
+                </div>
+              </>
+            )}
+            {!hasReportContent && !busy && !err && (
+              <p style={{ color: "var(--muted)", marginTop: 24 }}>
+                Choose an action above to generate a report, then download it to save a copy.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <aside className="panel analytics-saved-panel">
+          <h2 className="section-title" style={{ margin: "0 0 10px" }}>
+            Saved reports
+          </h2>
+          {reportsErr && <p style={{ color: "var(--danger)", fontSize: 13 }}>{reportsErr}</p>}
+          {!reportsErr && reports.length === 0 && (
+            <p style={{ color: "var(--muted)", fontSize: 13, margin: 0 }}>Saved reports will show here</p>
+          )}
+          {reports.length > 0 && (
+            <div className="analytics-saved-tabs">
+              {reports.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  className="analytics-report-tab"
+                  onClick={() => void openSavedReport(r.id)}
+                >
+                  <span className="analytics-report-tab-label">{kindLabel(r.kind)}</span>
+                  <span className="analytics-report-tab-when">{formatWhen(r.createdAt)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </aside>
       </div>
+
+      {popupReport && (
+        <SavedReportModal
+          report={popupReport}
+          onClose={() => setPopupReport(null)}
+          onDelete={() => void removeReport(popupReport.id)}
+        />
+      )}
     </section>
   );
 }

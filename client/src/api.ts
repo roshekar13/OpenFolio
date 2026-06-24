@@ -275,24 +275,39 @@ export async function deleteAnalyticsReport(id: string): Promise<void> {
   throw new Error(typeof j.error === "string" ? j.error : "Could not delete report.");
 }
 
-export async function postAnalyzePortfolio(): Promise<{ analysis: string; reportId: string }> {
+export async function postAnalyzePortfolio(): Promise<{ analysis: string }> {
   const r = await apiFetch("/api/analytics/analyze-portfolio", { method: "POST" });
-  const j = (await r.json()) as { analysis?: string; reportId?: string; error?: string };
+  const j = (await r.json()) as { analysis?: string; error?: string };
   if (!r.ok) throw new Error(typeof j.error === "string" ? j.error : "Portfolio analysis failed.");
-  if (typeof j.analysis !== "string" || typeof j.reportId !== "string") {
+  if (typeof j.analysis !== "string") {
     throw new Error("Invalid analysis response.");
   }
-  return { analysis: j.analysis, reportId: j.reportId };
+  return { analysis: j.analysis };
 }
 
-export async function postInvestmentIdeas(): Promise<{ ideas: string; reportId: string }> {
+export async function postInvestmentIdeas(): Promise<{ ideas: string }> {
   const r = await apiFetch("/api/analytics/investment-ideas", { method: "POST" });
-  const j = (await r.json()) as { ideas?: string; reportId?: string; error?: string };
+  const j = (await r.json()) as { ideas?: string; error?: string };
   if (!r.ok) throw new Error(typeof j.error === "string" ? j.error : "Investment ideas request failed.");
-  if (typeof j.ideas !== "string" || typeof j.reportId !== "string") {
+  if (typeof j.ideas !== "string") {
     throw new Error("Invalid ideas response.");
   }
-  return { ideas: j.ideas, reportId: j.reportId };
+  return { ideas: j.ideas };
+}
+
+export async function postSaveAnalyticsReport(
+  kind: AnalyticsReportKind,
+  body: string
+): Promise<AnalyticsReportDetail> {
+  const r = await apiFetch("/api/analytics/reports", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, body }),
+  });
+  const j = (await r.json()) as { report?: AnalyticsReportDetail; error?: string };
+  if (!r.ok) throw new Error(typeof j.error === "string" ? j.error : "Could not save report.");
+  if (!j.report) throw new Error("Invalid save report response.");
+  return j.report;
 }
 
 export type TradeDateQuoteResponse = {

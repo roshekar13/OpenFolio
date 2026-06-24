@@ -171,23 +171,18 @@ button {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  flex: 1;
-}
-
-.sidebar-footer {
-  margin-top: auto;
-  padding-top: 8px;
 }
 
 .sidebar-trust-btn {
   width: 100%;
   text-align: left;
-  border: 1px solid var(--stroke);
+  border: 1px solid transparent;
   border-radius: 12px;
-  padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.03);
+  padding: 8px 12px;
+  margin-top: 4px;
+  background: transparent;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
@@ -557,9 +552,70 @@ button {
   font-weight: 600;
 }
 
+.analytics-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: 20px;
+  align-items: start;
+}
+
+.analytics-main {
+  min-width: 0;
+}
+
+.analytics-saved-panel {
+  position: sticky;
+  top: 16px;
+  padding: 1rem 1.1rem;
+}
+
+.analytics-saved-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.analytics-report-tab {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.analytics-report-tab:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(94, 234, 212, 0.25);
+}
+
+.analytics-report-tab-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.analytics-report-tab-when {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 @media (max-width: 960px) {
   .home-two-col {
     grid-template-columns: 1fr;
+  }
+
+  .analytics-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-saved-panel {
+    position: static;
   }
 }
 
@@ -580,10 +636,6 @@ button {
     flex-wrap: wrap;
     flex: 1;
     justify-content: flex-end;
-  }
-  .sidebar-footer {
-    width: 100%;
-    margin-top: 4px;
   }
   .sidebar-link {
     min-width: 140px;

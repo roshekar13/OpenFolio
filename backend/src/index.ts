@@ -355,9 +355,7 @@ app.post("/api/analytics/analyze-portfolio", requireAuth, async (req, res) => {
       ANALYZE_SYSTEM,
       `Here is the complete portfolio dataset (Home metrics, positions/breakdown fields, ledger, watchlist):\n\n${userPayload}`
     );
-    const reportId = nanoid();
-    await saveAnalyticsReport(db, userId, "portfolio_analysis", text, reportId);
-    res.json({ analysis: text, reportId });
+    res.json({ analysis: text });
   } catch (e) {
     console.error(e);
     const msg = e instanceof Error ? e.message : String(e);
@@ -376,13 +374,39 @@ app.post("/api/analytics/investment-ideas", requireAuth, async (req, res) => {
       `Structured OpenFolio input (schema investmentIdeasInput.v1). Follow your system instructions exactly.\n\n${userPayload}`,
       { maxOutputTokens: 8192 }
     );
-    const reportId = nanoid();
-    await saveAnalyticsReport(db, userId, "investment_ideas", text, reportId);
-    res.json({ ideas: text, reportId });
+    res.json({ ideas: text });
   } catch (e) {
     console.error(e);
     const msg = e instanceof Error ? e.message : String(e);
     res.status(msg.includes("GEMINI_API_KEY") ? 503 : 500).json({ error: msg });
+  }
+});
+
+const saveReportSchema = z.object({
+  kind: z.enum(["portfolio_analysis", "investment_ideas"]),
+  body: z.string().min(1).max(500_000),
+});
+
+app.post("/api/analytics/reports", requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId!;
+    const parsed = saveReportSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.flatten() });
+      return;
+    }
+    const db = getDb();
+    const reportId = nanoid();
+    await saveAnalyticsReport(db, userId, parsed.data.kind, parsed.data.body, reportId);
+    const report = await getAnalyticsReport(db, userId, reportId);
+    if (!report) {
+      res.status(500).json({ error: "Report saved but could not be loaded." });
+      return;
+    }
+    res.status(201).json({ report });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: String(e) });
   }
 });
 

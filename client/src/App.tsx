@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import {
   Cell,
   Pie,
@@ -7,8 +7,8 @@ import {
   Tooltip as RTooltip,
 } from "recharts";
 import type { CapitalOverview, PortfolioResponse, Position, TransactionRow, WatchlistResponse } from "./api";
-import { fetchPortfolio, fetchTransactions, fetchWatchlist, postBulkDeleteTransactions } from "./api";
-import { setAuthToken, getAuthToken } from "./http";
+import { fetchPortfolio, fetchTransactions, fetchWatchlist, fetchAuthMe, postBulkDeleteTransactions } from "./api";
+import { setAuthToken } from "./http";
 import { AdvancedAnalyticsPage } from "./components/AdvancedAnalyticsPage";
 import { BuyVsCurrentChart } from "./components/BuyVsCurrentChart";
 import { BrandMark } from "./components/BrandMark";
@@ -548,6 +548,8 @@ export default function App() {
   );
 }
 
+const SESSION_EXPIRED_MSG = "Your session expired. Please sign in again.";
+
 function AppShell() {
   const { user, authLoading, authReady, refresh, logout } = useAuth();
   const [page, setPage] = useState<PageId>("home");
@@ -560,34 +562,59 @@ function AppShell() {
   const [importOpen, setImportOpen] = useState(false);
   const [chartOn, setChartOn] = useState<Record<string, boolean>>({});
   const [whyOpenFolioOpen, setWhyOpenFolioOpen] = useState(false);
+  const loadGenerationRef = useRef(0);
+  const prevUserRef = useRef<typeof user>(null);
+  const signedOutAtRef = useRef(0);
+
+  const applyDemoState = useCallback(() => {
+    setData(DEMO_PORTFOLIO);
+    setTx(DEMO_TRANSACTIONS);
+    setWatchlistData(DEMO_WATCHLIST);
+    setError(null);
+  }, []);
 
   const load = useCallback(async () => {
+    if (!user || user.needsDisplayName) return;
+
+    const gen = ++loadGenerationRef.current;
     setError(null);
     try {
       const [p, t] = await Promise.all([fetchPortfolio(), fetchTransactions()]);
+      if (gen !== loadGenerationRef.current) return;
       setData(p);
       setTx(t);
       setWatchlistData(await fetchWatchlist());
     } catch (e) {
+      if (gen !== loadGenerationRef.current) return;
       const msg = e instanceof Error ? e.message : "Load failed";
       if (msg === "UNAUTHORIZED") {
         setAuthToken(null);
-        await refresh();
-        if (!getAuthToken()) {
-          await logout();
-          setData(null);
-          setTx(null);
-          setWatchlistData(null);
-          setError("Your session expired. Please sign in again.");
+        const { user: me } = await fetchAuthMe();
+        if (gen !== loadGenerationRef.current) return;
+        if (!me) {
+          const recentSignOut = Date.now() - signedOutAtRef.current < 3000;
+          if (!recentSignOut) {
+            setError(SESSION_EXPIRED_MSG);
+          }
+          try {
+            await logout();
+          } catch {
+            /* already signed out */
+          }
+          applyDemoState();
           return;
         }
+        await refresh();
+        if (gen !== loadGenerationRef.current) return;
         try {
           const [p, t] = await Promise.all([fetchPortfolio(), fetchTransactions()]);
+          if (gen !== loadGenerationRef.current) return;
           setData(p);
           setTx(t);
           setWatchlistData(await fetchWatchlist());
           return;
         } catch (retryErr) {
+          if (gen !== loadGenerationRef.current) return;
           const retryMsg = retryErr instanceof Error ? retryErr.message : "Load failed";
           setError(retryMsg);
           return;
@@ -595,7 +622,15 @@ function AppShell() {
       }
       setError(msg);
     }
-  }, [logout, refresh]);
+  }, [user, logout, refresh, applyDemoState]);
+
+  const refreshPortfolio = useCallback(() => {
+    if (!user || user.needsDisplayName) {
+      applyDemoState();
+      return;
+    }
+    void load();
+  }, [user, load, applyDemoState]);
 
   const loadWatchlistOnly = useCallback(async () => {
     if (!user || user.needsDisplayName) return;
@@ -609,13 +644,16 @@ function AppShell() {
   useEffect(() => {
     if (authLoading || !authReady) return;
     if (!user) {
-      setData(DEMO_PORTFOLIO);
-      setTx(DEMO_TRANSACTIONS);
-      setWatchlistData(DEMO_WATCHLIST);
-      setError(null);
+      if (prevUserRef.current) signedOutAtRef.current = Date.now();
+      prevUserRef.current = null;
+      loadGenerationRef.current += 1;
+      setAuthToken(null);
+      applyDemoState();
       return;
     }
+    prevUserRef.current = user;
     if (user.needsDisplayName) {
+      loadGenerationRef.current += 1;
       setData(null);
       setTx(null);
       setWatchlistData(null);
@@ -623,7 +661,7 @@ function AppShell() {
       return;
     }
     void load();
-  }, [authLoading, authReady, user, load]);
+  }, [authLoading, authReady, user, load, applyDemoState]);
 
   useEffect(() => {
     const positions = data?.positions;
@@ -711,8 +749,6 @@ function AppShell() {
                 </button>
               );
             })}
-          </nav>
-          <div className="sidebar-footer">
             <button
               type="button"
               className="sidebar-trust-btn"
@@ -720,14 +756,14 @@ function AppShell() {
             >
               why OpenFolio?
             </button>
-          </div>
+          </nav>
         </aside>
 
         <div className="main-area">
           <MainHeader
             pageTitle={pageTitle}
             kicker={kicker}
-            onRefresh={load}
+            onRefresh={refreshPortfolio}
             onNewTx={() => setModal(true)}
             accountSlot={<UserAccountMenu />}
             actionsDisabled={headerActionsDisabled}
