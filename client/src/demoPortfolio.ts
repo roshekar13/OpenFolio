@@ -162,47 +162,12 @@ export const DEMO_PORTFOLIO: PortfolioResponse = {
   },
 };
 
-/** Illustrative 1-month close series for demo sparklines (not live). */
-function demoChartCloses(start: number, end: number, points = 22): number[] {
-  const out: number[] = [];
-  for (let i = 0; i < points; i++) {
-    const t = i / (points - 1);
-    const wiggle = Math.sin(i * 0.55) * (end - start) * 0.04;
-    out.push(start + (end - start) * t + wiggle);
-  }
-  return out;
-}
-
 export const DEMO_WATCHLIST: WatchlistResponse = {
   max: 4,
   items: [
-    {
-      ticker: "AMD",
-      name: "Advanced Micro Devices, Inc.",
-      priceUsd: 118.4,
-      changePct: 0.034,
-      chartCloses: demoChartCloses(108, 118.4),
-    },
-    {
-      ticker: "META",
-      name: "Meta Platforms, Inc.",
-      priceUsd: 612.5,
-      changePct: -0.012,
-      chartCloses: demoChartCloses(620, 612.5),
-    },
-    {
-      ticker: "TSLA",
-      name: "Tesla, Inc.",
-      priceUsd: 294.3,
-      changePct: 0.021,
-      chartCloses: demoChartCloses(288, 294.3),
-    },
-    {
-      ticker: "AMZN",
-      name: "Amazon.com, Inc.",
-      priceUsd: 228.9,
-      changePct: 0.008,
-      chartCloses: demoChartCloses(227, 228.9),
-    },
+    { ticker: "AMD", priceUsd: 118.4, change1moPct: 0.034 },
+    { ticker: "META", priceUsd: 612.5, change1moPct: -0.012 },
+    { ticker: "TSLA", priceUsd: 294.3, change1moPct: 0.021 },
+    { ticker: "AMZN", priceUsd: 228.9, change1moPct: 0.008 },
   ],
 };

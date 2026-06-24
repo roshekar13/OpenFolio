@@ -45,7 +45,6 @@ import {
   occurredAtFromTradeDateYmd,
   validateTradeCalendarDate,
 } from "./historicalQuotes.js";
-import { fetchPriceChartData, isPriceChartRange } from "./priceChart.js";
 import { loadServerEnv } from "./loadEnv.js";
 import {
   corsOrigin,
@@ -439,33 +438,6 @@ app.delete("/api/analytics/reports/:id", requireAuth, async (req, res) => {
     return;
   }
   res.status(204).send();
-});
-
-app.get("/api/market/price-chart", async (req, res) => {
-  try {
-    const ticker = String(req.query.ticker ?? "").trim();
-    const rangeRaw = String(req.query.range ?? "1mo").trim();
-    if (!ticker) {
-      res.status(400).json({ error: "Query parameter ticker is required." });
-      return;
-    }
-    if (!isPriceChartRange(rangeRaw)) {
-      res.status(400).json({ error: "Query parameter range must be 1w, 1mo, 6mo, or ytd." });
-      return;
-    }
-    const chart = await fetchPriceChartData(ticker, rangeRaw);
-    res.json({
-      ticker: ticker.toUpperCase(),
-      range: rangeRaw,
-      name: chart.name,
-      changePct: chart.changePct,
-      closes: chart.closes,
-      timestamps: chart.timestamps,
-    });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: String(e) });
-  }
 });
 
 app.get("/api/market/trade-date-quote", async (req, res) => {

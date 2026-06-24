@@ -1,15 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
-import type { WatchlistItem, WatchlistResponse } from "../api";
-import { fetchPriceChart, putWatchlist } from "../api";
+import { useCallback, useState } from "react";
+import type { WatchlistResponse } from "../api";
+import { putWatchlist } from "../api";
 import { useCurrency } from "../CurrencyContext";
 import { fmtPct, fmtUsd } from "../format";
-import { WatchlistDetailModal } from "./WatchlistDetailModal";
-import { PriceSparkline } from "./PriceSparkline";
-
-type RowChart = {
-  changePct: number | null;
-  closes: number[];
-};
 
 export function WatchlistPanel({
   data,
@@ -24,43 +17,9 @@ export function WatchlistPanel({
   const [tickerInput, setTickerInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [detailItem, setDetailItem] = useState<WatchlistItem | null>(null);
-  const [rowCharts, setRowCharts] = useState<Record<string, RowChart>>({});
 
   const items = data?.items ?? [];
   const max = data?.max ?? 4;
-
-  useEffect(() => {
-    let cancelled = false;
-    const tickersKey = items.map((i) => i.ticker).join(",");
-    if (!tickersKey) {
-      setRowCharts({});
-      return;
-    }
-
-    void (async () => {
-      const next: Record<string, RowChart> = {};
-      for (const item of items) {
-        if (readOnly && item.chartCloses.length >= 2) {
-          next[item.ticker] = { changePct: item.changePct, closes: item.chartCloses };
-          continue;
-        }
-        try {
-          const chart = await fetchPriceChart(item.ticker, "1mo");
-          if (chart.closes.length >= 2) {
-            next[item.ticker] = { changePct: chart.changePct, closes: chart.closes };
-          }
-        } catch {
-          /* preview optional */
-        }
-      }
-      if (!cancelled) setRowCharts(next);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [items, readOnly]);
 
   const saveTickers = useCallback(
     async (next: string[]) => {
@@ -158,39 +117,24 @@ export function WatchlistPanel({
           <div style={{ color: "var(--muted)", fontSize: 14 }}>No symbols yet. Add up to {max} tickers.</div>
         )}
         {items.map((w) => {
-          const preview = rowCharts[w.ticker];
-          const ch = preview?.changePct ?? w.changePct;
-          const closes = preview?.closes ?? w.chartCloses;
+          const ch = w.change1moPct;
           const up = ch != null && ch > 0;
           const down = ch != null && ch < 0;
           const arrow = ch == null ? "—" : up ? "▲" : down ? "▼" : "→";
           const tone = up ? "var(--ok)" : down ? "var(--danger)" : "var(--muted)";
-          const detailRow: WatchlistItem = preview
-            ? { ...w, changePct: preview.changePct, chartCloses: preview.closes, name: w.name }
-            : w;
           return (
             <div
               key={w.ticker}
               className="watch-row"
-              role="button"
-              tabIndex={0}
-              onClick={() => setDetailItem(detailRow)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setDetailItem(detailRow);
-                }
-              }}
               style={{
                 display: "grid",
-                gridTemplateColumns: readOnly ? "1fr auto auto" : "1fr auto auto auto",
+                gridTemplateColumns: readOnly ? "1fr auto" : "1fr auto auto",
                 alignItems: "center",
-                gap: 10,
+                gap: 12,
                 padding: "12px 14px",
                 borderRadius: 14,
                 border: "1px solid var(--stroke)",
                 background: "linear-gradient(145deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))",
-                cursor: "pointer",
               }}
             >
               <div>
@@ -210,15 +154,11 @@ export function WatchlistPanel({
                   {fmtPrice(w.priceUsd)}
                 </div>
               </div>
-              <PriceSparkline values={closes} changePct={ch} width={52} height={24} />
               {!readOnly && (
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void remove(w.ticker);
-                  }}
+                  onClick={() => void remove(w.ticker)}
                   style={{
                     border: "1px solid var(--stroke)",
                     background: "rgba(255,255,255,0.04)",
@@ -236,8 +176,6 @@ export function WatchlistPanel({
           );
         })}
       </div>
-
-      {detailItem && <WatchlistDetailModal item={detailItem} onClose={() => setDetailItem(null)} />}
     </div>
   );
 }

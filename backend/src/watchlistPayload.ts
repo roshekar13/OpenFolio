@@ -1,35 +1,29 @@
 import type { Db } from "mongodb";
 import { fetchPrices } from "./prices.js";
+import { fetchOneMonthReturnPct } from "./momentum.js";
 import { listWatchlistTickers } from "./mongo/watchlist.js";
 
-/** Watchlist prices only — chart series are loaded client-side via /api/market/price-chart. */
 export async function loadWatchlistPayload(
   db: Db,
   userId: string,
   priceMap?: Record<string, number | null>
 ): Promise<{
-  items: {
-    ticker: string;
-    name: string | null;
-    priceUsd: number | null;
-    changePct: number | null;
-    chartCloses: number[];
-  }[];
+  items: { ticker: string; priceUsd: number | null; change1moPct: number | null }[];
   max: number;
 }> {
   const tickers = await listWatchlistTickers(db, userId);
   const prices = priceMap ?? (await fetchPrices(tickers));
 
-  const items = tickers.map((ticker) => {
+  const items: { ticker: string; priceUsd: number | null; change1moPct: number | null }[] = [];
+  for (const ticker of tickers) {
     const upper = ticker.trim().toUpperCase();
-    return {
+    const change1moPct = await fetchOneMonthReturnPct(ticker);
+    items.push({
       ticker: upper,
-      name: null,
       priceUsd: prices[upper] ?? null,
-      changePct: null,
-      chartCloses: [] as number[],
-    };
-  });
+      change1moPct,
+    });
+  }
 
   return { items, max: 4 };
 }
