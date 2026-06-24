@@ -151,7 +151,13 @@ export type YahooChartJson = {
   chart?: {
     error?: { description?: string };
     result?: {
-      meta?: { regularMarketPrice?: number; symbol?: string; currency?: string };
+      meta?: {
+        regularMarketPrice?: number;
+        symbol?: string;
+        currency?: string;
+        shortName?: string;
+        longName?: string;
+      };
       timestamp?: number[];
       indicators?: { quote?: { close?: (number | null)[] }[] };
     }[];

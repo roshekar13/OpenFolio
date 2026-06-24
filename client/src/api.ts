@@ -82,10 +82,22 @@ export type PortfolioResponse = {
   liveFxSgdPerUsd: number | null;
 };
 
+export type PriceChartRange = "1w" | "1mo" | "6mo" | "ytd";
+
 export type WatchlistItem = {
   ticker: string;
+  name: string | null;
   priceUsd: number | null;
-  change2wPct: number | null;
+  changePct: number | null;
+  chartCloses: number[];
+};
+
+export type PriceChartResponse = {
+  ticker: string;
+  range: PriceChartRange;
+  name: string | null;
+  changePct: number | null;
+  closes: number[];
 };
 
 export type WatchlistResponse = {
@@ -308,6 +320,16 @@ export async function postSaveAnalyticsReport(
   if (!r.ok) throw new Error(typeof j.error === "string" ? j.error : "Could not save report.");
   if (!j.report) throw new Error("Invalid save report response.");
   return j.report;
+}
+
+export async function fetchPriceChart(ticker: string, range: PriceChartRange): Promise<PriceChartResponse> {
+  const q = new URLSearchParams({ ticker: ticker.trim(), range });
+  const r = await apiFetch(`/api/market/price-chart?${q.toString()}`);
+  const j = (await r.json()) as PriceChartResponse & { error?: string };
+  if (!r.ok) {
+    throw new Error(typeof j.error === "string" ? j.error : "Could not load price chart.");
+  }
+  return j as PriceChartResponse;
 }
 
 export type TradeDateQuoteResponse = {

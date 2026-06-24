@@ -139,7 +139,7 @@ export type InvestmentIdeasInputV1 = {
   capital: CapitalOverview;
   positions: Position[];
   latestPrices: Record<string, number | null>;
-  watchlist: { items: { ticker: string; priceUsd: number | null; change2wPct: number | null }[]; max: number };
+  watchlist: { items: { ticker: string; name: string | null; priceUsd: number | null; changePct: number | null; chartCloses: number[] }[]; max: number };
   holdingsTickers: string[];
   watchlistTickers: string[];
   derivedPortfolioSummary: ReturnType<typeof computeDerived>;
@@ -167,7 +167,7 @@ export async function buildInvestmentIdeasInput(
   const capital = bundle.capital as CapitalOverview;
   const allTx = bundle.transactions;
 
-  type WlItem = { ticker: string; priceUsd: number | null; change2wPct: number | null };
+  type WlItem = { ticker: string; name: string | null; priceUsd: number | null; changePct: number | null; chartCloses: number[] };
   const watchlist = bundle.watchlist as { items: WlItem[]; max: number };
 
   const excluded = allTx.filter(isFxOrCurrencyRelatedTransaction);

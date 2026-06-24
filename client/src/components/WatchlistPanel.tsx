@@ -1,8 +1,10 @@
 import { useCallback, useState } from "react";
-import type { WatchlistResponse } from "../api";
+import type { WatchlistItem, WatchlistResponse } from "../api";
 import { putWatchlist } from "../api";
 import { useCurrency } from "../CurrencyContext";
 import { fmtPct, fmtUsd } from "../format";
+import { WatchlistDetailModal } from "./WatchlistDetailModal";
+import { PriceSparkline } from "./PriceSparkline";
 
 export function WatchlistPanel({
   data,
@@ -17,6 +19,7 @@ export function WatchlistPanel({
   const [tickerInput, setTickerInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [detailItem, setDetailItem] = useState<WatchlistItem | null>(null);
 
   const items = data?.items ?? [];
   const max = data?.max ?? 4;
@@ -117,7 +120,7 @@ export function WatchlistPanel({
           <div style={{ color: "var(--muted)", fontSize: 14 }}>No symbols yet. Add up to {max} tickers.</div>
         )}
         {items.map((w) => {
-          const ch = w.change2wPct;
+          const ch = w.changePct;
           const up = ch != null && ch > 0;
           const down = ch != null && ch < 0;
           const arrow = ch == null ? "—" : up ? "▲" : down ? "▼" : "→";
@@ -126,15 +129,25 @@ export function WatchlistPanel({
             <div
               key={w.ticker}
               className="watch-row"
+              role="button"
+              tabIndex={0}
+              onClick={() => setDetailItem(w)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setDetailItem(w);
+                }
+              }}
               style={{
                 display: "grid",
-                gridTemplateColumns: readOnly ? "1fr auto" : "1fr auto auto",
+                gridTemplateColumns: readOnly ? "1fr auto auto" : "1fr auto auto auto",
                 alignItems: "center",
-                gap: 12,
+                gap: 10,
                 padding: "12px 14px",
                 borderRadius: 14,
                 border: "1px solid var(--stroke)",
                 background: "linear-gradient(145deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))",
+                cursor: "pointer",
               }}
             >
               <div>
@@ -144,7 +157,7 @@ export function WatchlistPanel({
                 <div className="mono" style={{ fontSize: 12, marginTop: 4, color: ch == null ? "var(--muted)" : tone }}>
                   {ch == null ? "—" : (
                     <>
-                      {arrow} {fmtPct(ch)}
+                      {arrow} {fmtPct(ch)} 1M
                     </>
                   )}
                 </div>
@@ -154,11 +167,15 @@ export function WatchlistPanel({
                   {fmtPrice(w.priceUsd)}
                 </div>
               </div>
+              <PriceSparkline values={w.chartCloses} changePct={w.changePct} width={52} height={24} />
               {!readOnly && (
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => void remove(w.ticker)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void remove(w.ticker);
+                  }}
                   style={{
                     border: "1px solid var(--stroke)",
                     background: "rgba(255,255,255,0.04)",
@@ -176,6 +193,8 @@ export function WatchlistPanel({
           );
         })}
       </div>
+
+      {detailItem && <WatchlistDetailModal item={detailItem} onClose={() => setDetailItem(null)} />}
     </div>
   );
 }
