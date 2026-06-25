@@ -77,11 +77,19 @@ function Modal({
       role="dialog"
       aria-modal
       className={"app-modal-overlay" + (allowBackdropClose ? "" : " app-modal-overlay-locked")}
-      onMouseDown={(e) => {
-        if (allowBackdropClose && e.target === e.currentTarget) onClose();
-      }}
+      onMouseDown={
+        allowBackdropClose
+          ? (e) => {
+              if (e.target === e.currentTarget) onClose();
+            }
+          : undefined
+      }
     >
-      <div className="app-modal-panel" onMouseDown={(e) => e.stopPropagation()}>
+      <div
+        className="app-modal-panel"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <div style={{ fontSize: 17, fontWeight: 650 }}>{title}</div>
           <button type="button" className="btn-ghost" style={{ padding: "6px 10px" }} onClick={onClose}>

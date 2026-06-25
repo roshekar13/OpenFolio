@@ -587,6 +587,7 @@ function AppShell() {
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const loadGenerationRef = useRef(0);
   const prevUserIdRef = useRef<string | null>(null);
+  const authInitializedRef = useRef(false);
   const signedOutAtRef = useRef(0);
 
   const applyWatchlistMomentum = useCallback(
@@ -718,6 +719,8 @@ function AppShell() {
       setLoadedUserId(null);
       setPortfolioLoading(false);
       applyDemoState();
+      setWelcomeOpen(true);
+      authInitializedRef.current = true;
       return;
     }
     if (needsDisplayName) {
@@ -733,8 +736,20 @@ function AppShell() {
       setError(null);
       return;
     }
+    if (!authInitializedRef.current) {
+      authInitializedRef.current = true;
+      prevUserIdRef.current = userId;
+      setData(null);
+      setTx(null);
+      setWatchlistData(null);
+      setLoadedUserId(null);
+      setError(null);
+      void load();
+      return;
+    }
     if (prevUserIdRef.current !== userId) {
       prevUserIdRef.current = userId;
+      setWelcomeOpen(true);
       setData(null);
       setTx(null);
       setWatchlistData(null);
@@ -750,22 +765,12 @@ function AppShell() {
     authLoading,
     authReady,
     sessionBusy,
-    user?.id,
-    user?.needsDisplayName,
+    user,
     loadedUserId,
     portfolioLoading,
     load,
     applyDemoState,
   ]);
-
-  useEffect(() => {
-    if (authLoading || !authReady || sessionBusy) return;
-    if (!user) {
-      setWelcomeOpen(true);
-    } else {
-      setWelcomeOpen(false);
-    }
-  }, [authLoading, authReady, sessionBusy, user?.id]);
 
   useEffect(() => {
     const positions = data?.positions;
@@ -785,7 +790,7 @@ function AppShell() {
   const c = data?.capital;
   const positions = data?.positions ?? [];
   const isDemo = !user && authReady && !authLoading;
-  const showWelcome = isDemo && welcomeOpen && !sessionBusy;
+  const showWelcome = welcomeOpen && authReady && !authLoading && !sessionBusy;
   const portfolioReady = Boolean(
     (isDemo && data && tx !== null) ||
       (user && !user.needsDisplayName && data && tx !== null && loadedUserId === user.id)
@@ -841,7 +846,9 @@ function AppShell() {
     <CurrencyProvider liveFx={data?.liveFxSgdPerUsd ?? null}>
       <CompleteProfileModal />
       {uiBlocked && !showWelcome && <SessionOverlay message={overlayMessage} />}
-      {showWelcome && <WelcomeOverlay onDismiss={() => setWelcomeOpen(false)} />}
+      {showWelcome && (
+        <WelcomeOverlay demoMode={isDemo} onDismiss={() => setWelcomeOpen(false)} />
+      )}
       <div className={"app-shell" + (uiBlocked ? " app-shell-blocked" : "")}>
         <aside className="sidebar" aria-label="Primary">
           <div className="sidebar-brand">

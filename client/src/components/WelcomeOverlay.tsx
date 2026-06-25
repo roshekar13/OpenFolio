@@ -1,6 +1,12 @@
 import { createPortal } from "react-dom";
 
-export function WelcomeOverlay({ onDismiss }: { onDismiss: () => void }) {
+export function WelcomeOverlay({
+  onDismiss,
+  demoMode,
+}: {
+  onDismiss: () => void;
+  demoMode: boolean;
+}) {
   return createPortal(
     <div
       className="welcome-overlay"
@@ -21,7 +27,11 @@ export function WelcomeOverlay({ onDismiss }: { onDismiss: () => void }) {
         <p className="welcome-overlay-body">
           Track your trades, monitor live performance, and understand your portfolio in one private workspace.
         </p>
-        <p className="welcome-overlay-hint">Click anywhere to explore the sample portfolio</p>
+        <p className="welcome-overlay-hint">
+          {demoMode
+            ? "Click anywhere to explore the sample portfolio"
+            : "Click anywhere to continue to your portfolio"}
+        </p>
       </div>
     </div>,
     document.body
